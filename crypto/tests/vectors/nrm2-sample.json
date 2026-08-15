@@ -1,0 +1,73 @@
+{
+  "_comment": [
+    "SHARED FIXTURE (NRM-2, the CURRENT format) — two independent implementations must agree on",
+    "this document.",
+    "  Rust  : nmts/crypto/tests/api.rs        (what the standalone recovery tool will parse)",
+    "  Web   : nmts/web/test/recovery-map.test.ts  (what the browser writes)",
+    "The browser assembles the manifest JSON itself because the document contains every file",
+    "key and therefore may never leave the crypto worker in the clear. That makes this file the",
+    "contract between the writer and the reader. Both sides compare PARSED values, not bytes, so",
+    "key order is free; field names and shapes are not.",
+    "Keys beginning with _ are documentation and are ignored by both parsers.",
+    "Covers: the chain fields, a multi-part file with no quilt, a quilted file, an item with no",
+    "content hash (committed before hashes existed), a part with no Sui object id, a part that",
+    "NAMES its storage network, and a part that omits it (= walrus, what pre-field maps look like).",
+    "The 'filecoin' value below is a FORMAT PROBE, not a claim that anything is stored there — a",
+    "non-default name is what stops either side passing this test with 'walrus' hardcoded.",
+    "NRM-2 added part_index, required on every part and equal to that part's own position in the",
+    "array (RECOVERY-MANIFEST.md 2.1). It is spelled out here rather than derived so that a wrong",
+    "number is caught by a written value instead of by a loop that would agree with itself.",
+    "nrm1-sample.json beside this file is the same document one version back, kept so the",
+    "backward-compatible parse stays exercised."
+  ],
+  "v": 2,
+  "seq": 12,
+  "prev_manifest_blob_id": "prevManifestBlob",
+  "generated_at": "2026-07-26T00:00:00Z",
+  "account_id": "abcdEFGH1234-_wx",
+  "items": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "name": "big.bin",
+      "path": "/",
+      "size": 1073741825,
+      "dek": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+      "kind": "file",
+      "content_hash": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      "parts": [
+        {
+          "part_index": 0,
+          "blob_id": "blobA",
+          "plaintext_len": 1073741824,
+          "sui_object_id": "0xabc",
+          "network": "walrus"
+        },
+        {
+          "part_index": 1,
+          "blob_id": "blobB",
+          "plaintext_len": 1
+        }
+      ]
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "note.txt",
+      "path": "/docs",
+      "size": 12,
+      "dek": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      "kind": "file",
+      "parts": [
+        {
+          "part_index": 0,
+          "blob_id": "blobC",
+          "plaintext_len": 12,
+          "network": "filecoin"
+        }
+      ],
+      "quilt": {
+        "quilt_blob_id": "quiltX",
+        "patch_id": "patch7"
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+# nmts-crypto-wasm — the wasm-bindgen surface over `nmts-crypto` (the frozen NCF-1 engine).
+#
+# WHY A SEPARATE CRATE: `nmts/crypto` is a pure, I/O-free library with NO wasm-bindgen
+# exports and no `cdylib` crate-type, so `wasm-pack` cannot build it directly. Rather than
+# add browser-only glue into the audited crypto crate (which the api and the standalone
+# recovery tool also reuse WITHOUT wasm-bindgen), this thin sibling crate re-exports exactly
+# the NCF-1 operations the web worker needs. It lives at nmts/ top level next to crypto/,
+# api/, chain/ (spec §11).
+#
+# SECURITY: this depends on `nmts-crypto` with the `wasm` feature ONLY (getrandom → the
+# browser's WebCrypto). It deliberately does NOT enable the crypto crate's `vectors`
+# feature — that feature exposes caller-supplied-nonce constructors and must never ship in
+# a production/browser build. The conformance harness proves byte-identity through the
+# production entry points instead (which is the stronger guarantee: it exercises the exact
+# code path the browser runs).
+#
+# BUILD: driven by `nmts/deploy/build-crypto-wasm.mjs` on the build box
+# (`wasm-pack build --target web`). Do not build locally (no cargo here).
+
+[package]
+name = "nmts-crypto-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "wasm-bindgen surface over nmts-crypto (NCF-1) for nmts/web. Production build only — never enable the `vectors` feature here."
+license = "AGPL-3.0-only"
+publish = false
+
+# Declare this package as its own workspace root. Prevents cargo, when invoked on the build
+# box, from walking up the directory tree and accidentally attaching to a parent workspace.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The frozen NCF-1 engine. `wasm` routes randomness through WebCrypto and pulls in
+# wasm-bindgen. NOT `vectors` (see the SECURITY note above).
+nmts-crypto = { path = "../crypto", features = ["wasm"] }
+wasm-bindgen = "0.2"
+# Same SHA-256 implementation the Rust engine uses, re-exported for stream-digest checks.
+sha2 = "0.10"
+# RESUME RE-DERIVATION ONLY. Pinned to the SAME version/features the crypto crate uses so the
+# resume encryptor's seal math is byte-identical to the frozen engine (the conformance harness
+# proves it). This does NOT re-implement NCF-1: `Header::parse` + the frozen constants come from
+# nmts-crypto; only the private chunk-seal loop (which the crypto crate cannot expose without its
+# forbidden `vectors` feature) is mirrored here. See the safety note on `resumeFromHeader`.
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }

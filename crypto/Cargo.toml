@@ -1,0 +1,84 @@
+[package]
+name = "nmts-crypto"
+version = "0.1.0"
+edition = "2021"
+description = "NMTS end-to-end encryption engine — a pure, I/O-free implementation of the NCF-3 format (see docs/CRYPTO-FORMAT-NCF3.md)."
+license = "AGPL-3.0-only"
+publish = false
+
+[lib]
+name = "nmts_crypto"
+
+[dependencies]
+# AEAD: XChaCha20-Poly1305 (24-byte nonce, 16-byte tag) — NCF-1 §0.
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+# Password KDF: Argon2id v1.3 — NCF-1 §2. Raw-hash path only (no PHC string handling).
+argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
+# Key expansion: HKDF-SHA-256 — NCF-1 §2.
+hkdf = "0.12"
+sha2 = "0.10"
+# Randomness abstraction + OS CSPRNG backend. The `wasm` feature routes getrandom
+# through the browser's WebCrypto (`crypto.getRandomValues`) via its `js` backend.
+rand_core = "0.6"
+getrandom = { version = "0.2", default-features = false }
+# Hybrid post-quantum key agreement — NCF-3 §5.3 (private person-to-person sharing).
+# X-Wing = X25519 + ML-KEM-768 combined by a fixed published rule, so BOTH must be broken to
+# recover a shared DEK. Walrus is a public network, so shared ciphertext can be harvested today
+# and opened later; this is the one place in NMTS where that matters, and the one place a change
+# becomes impossible after the mainnet cutover (share addresses are immutable once published).
+# RustCrypto, same maintainers as the AEAD/HKDF/SHA-2 above. Its deterministic key generation
+# from a 32-byte seed is what keeps the share identity reproducible from the account code alone.
+x-wing = { version = "0.1", default-features = false, features = ["zeroize"] }
+# The identity SELF-SIGNATURE (NCF-3 §5.2a, revised 2026-08-02). ML-DSA-44, FIPS 204 final.
+# The share address fingerprints only the identity ROOT (derivation index + this verification
+# key); every other key in the bundle is bound to that root by a signature instead of by the
+# fingerprint, which is what leaves room to replace a key later under an address that is
+# immutable. The anchor is lattice-based on purpose: it has to outlive the classical keys.
+# ⛔ Only the DETERMINISTIC signing variant is ever called (`sign_deterministic`, rnd = 0^32).
+# A hedged signature would give one account different identity bytes on every device, which the
+# server's first-writer rule would reject as a conflict.
+# `default-features = false` drops `getrandom` (we never use the crate's RNG) and `pkcs8` (we do
+# not serialise keys in that form); `alloc` keeps the large lattice values off the stack, which
+# matters in the browser build, and `zeroize` clears the expanded signing key on drop.
+# Same maintainers and the same lattice stack as the `x-wing`/`ml-kem` above, so `shake`,
+# `module-lattice` and `hybrid-array` are shared rather than duplicated.
+ml-dsa = { version = "0.1.1", default-features = false, features = ["alloc", "zeroize"] }
+# The SENDER-AUTHENTICATION half of the share identity (NCF-3 §5). A second, static X25519 key:
+# the sender agrees with the recipient's matching key and mixes the result into the wrapping key,
+# so an envelope only opens if the claimed sender produced it — and, unlike a signature, that
+# proof is not transferable to anyone else. Same major version x-wing already pulls in, so there
+# is one copy of the curve in the tree.
+x25519-dalek = { version = "3", default-features = false, features = ["static_secrets"] }
+# Constant-time comparison for the key commitment (NCF-3 §3.2). Comparing it with `==` would
+# leak, through timing, how many leading bytes of a guessed key were right.
+subtle = { version = "2", default-features = false }
+# Zero sensitive buffers on drop.
+zeroize = { version = "1", features = ["zeroize_derive"] }
+# Recovery-manifest (de)serialization — NCF-1 §6.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Typed errors.
+thiserror = "2"
+# Optional: WASM bindings surface (no bindings shipped yet; reserved for nmts/web).
+wasm-bindgen = { version = "0.2", optional = true }
+
+[dev-dependencies]
+proptest = "1"
+hex = "0.4"
+# CROSS-CHECK ONLY — an independent ML-DSA-44 implementation (IntegrityChain), used by the tests
+# to confirm that the same 32-byte seed yields the same verification key and the same
+# deterministic signature under two unrelated codebases, and that each verifies the other's
+# signature. It is a dev-dependency on purpose: it ships in nothing, so its own maintenance risk
+# is not ours, and the conformance vectors gain a second implementation's word for their bytes.
+fips204 = "0.4.6"
+
+[features]
+default = []
+# Enables getrandom's browser (WebCrypto) backend and the wasm-bindgen surface.
+wasm = ["getrandom/js", "dep:wasm-bindgen"]
+# Exposes deterministic, caller-supplied-nonce constructors used ONLY to (re)generate
+# and verify the committed test vectors. Never enable in production builds.
+vectors = []
+
+[package.metadata.docs.rs]
+all-features = false

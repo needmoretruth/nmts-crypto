@@ -1,0 +1,27 @@
+# Runs the conformance vectors on every push to main.
+#
+# WHY THIS EXISTS: the point of this repository is that you do not have to take NMTS's word for
+# anything. "The tests pass" is worth more when GitHub says it than when the README does.
+#
+# ⛔ IT REACTS TO `push` ONLY — never to `pull_request`. A workflow that runs on pull requests
+#    executes code an outsider wrote, inside this repository. There is nothing here worth
+#    stealing (no secrets are used, and none should ever be added), but a job that a stranger
+#    can start is a door with no reason to exist. Pull requests are not accepted here anyway.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vectors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Conformance vectors and unit tests
+        working-directory: crypto
+        run: cargo test --features vectors --verbose

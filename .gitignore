@@ -1,0 +1,17 @@
+# Rust
+/crypto/target/
+/crypto-wasm/target/
+/crypto-wasm/pkg/
+**/*.rs.bk
+
+# wasm-pack / node — the browser artifact is BUILT by whoever wants to check it,
+# never committed here. A committed binary would invite the exact confusion this
+# repository exists to remove: "is the file in the repo the file the site serves?"
+node_modules/
+/pkg/
+
+# Editors and OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
