@@ -16,7 +16,7 @@ use nmts_crypto::framing::{
     forge_stream_with_final_flag, verify_part_set, Header, StreamDecryptor, StreamEncryptor,
     DEFAULT_CHUNK_SIZE_LOG2, HEADER_LEN, TAG_LEN,
 };
-use nmts_crypto::{b64, kdf, share, wrap};
+use nmts_crypto::{b64, kdf, manifest, share, wrap};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -404,7 +404,11 @@ fn gen_kdf_vectors() -> Vec<Value> {
                 "note": "Every output of the NCF-3 account-code chain (§1). `wallet_seed_hex` is \
                          wallet 0 under its historical key name — the JS conformance harnesses \
                          read that exact spelling — and `wallet_seed_1_hex` / `wallet_seed_10_hex` \
-                         cover the decimal-label rule (wallet 10 is not wallet 1 with a zero).",
+                         cover the decimal-label rule (wallet 10 is not wallet 1 with a zero). \
+                         `recovery_patch_name` is not a key: it is the public name the recovery \
+                         manifest is stored under inside a quilt (§2.3), pinned here because the \
+                         browser and the standalone recovery tool must compute the same one or a \
+                         recovery finds nothing.",
                 "code_display": code.display(),
                 "code_canonical": code.canonical(),
                 "code_bytes_hex": hex::encode(bytes),
@@ -421,6 +425,7 @@ fn gen_kdf_vectors() -> Vec<Value> {
                 "wallet_seed_hex": hex::encode(*keys.wallet_seed_for(0)),
                 "wallet_seed_1_hex": hex::encode(*keys.wallet_seed_for(1)),
                 "wallet_seed_10_hex": hex::encode(*keys.wallet_seed_for(10)),
+                "recovery_patch_name": manifest::recovery_patch_name(&keys.data_key),
             })
         })
         .collect()
@@ -1314,6 +1319,14 @@ fn verify_kdf() {
             hex::encode(*keys.file_list_key),
             v["file_list_key_hex"].as_str().unwrap(),
             "file_list_key"
+        );
+        // Not a key — the public name the manifest is stored under inside a quilt. It is pinned
+        // in the same group as the key it derives from, because the account code is the only
+        // thing a recovery has and this is what turns that code into a place to look.
+        assert_eq!(
+            manifest::recovery_patch_name(&keys.data_key),
+            v["recovery_patch_name"].as_str().unwrap(),
+            "recovery_patch_name"
         );
         assert_eq!(
             hex::encode(*keys.share_sig_seed),

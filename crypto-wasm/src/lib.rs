@@ -51,7 +51,7 @@ use nmts_crypto::framing::{
     decrypt_chunk, Header, PartPlacement, StreamDecryptor, StreamEncryptor, AAD_LEN, HEADER_LEN,
     NONCE_LEN, NONCE_PREFIX_LEN,
 };
-use nmts_crypto::{b64, kdf, share, wrap};
+use nmts_crypto::{b64, kdf, manifest, share, wrap};
 use sha2::{Digest, Sha256};
 use wasm_bindgen::{prelude::*, JsError};
 
@@ -893,4 +893,21 @@ pub fn account_code_display(code_bytes: &[u8]) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn voucher_hash_from_input(input: &str) -> Vec<u8> {
     codes::voucher_hash_from_input(input).to_vec()
+}
+
+/// The name this account's recovery manifest is stored under inside a quilt (NCF-3 §2.5).
+///
+/// Public, and deliberately not secret-looking: it is a v4-shaped UUID exactly like the random
+/// per-item identifiers beside it in the same quilt. What it buys is that a recovery holding only
+/// an account code can compute the one name to ask a public aggregator for — no NMTS server, no
+/// saved file, no prior knowledge of the account's data.
+///
+/// Takes `dataKey` rather than the account code because that key already lives in the worker; the
+/// code does not, and moving it here to hash it would put it somewhere it has no reason to be.
+#[wasm_bindgen]
+pub fn recovery_patch_name(data_key: &[u8]) -> Result<String, JsError> {
+    let key: [u8; 32] = data_key
+        .try_into()
+        .map_err(|_| JsError::new("dataKey must be 32 bytes"))?;
+    Ok(manifest::recovery_patch_name(&key))
 }

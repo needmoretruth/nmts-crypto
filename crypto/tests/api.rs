@@ -5,7 +5,7 @@
 
 use nmts_crypto::codes::{self, AccountCode, CodeError, VoucherCode};
 use nmts_crypto::framing::{FramingError, StreamDecryptor, StreamEncryptor};
-use nmts_crypto::manifest::{Item, ManifestError, Part, Quilt, RecoveryManifest};
+use nmts_crypto::manifest::{self, Item, ManifestError, Part, Quilt, RecoveryManifest};
 use nmts_crypto::{b64, kdf, share, wrap};
 
 // ----- codes -------------------------------------------------------------------------
@@ -329,7 +329,7 @@ fn sample_manifest() -> RecoveryManifest {
                         // Spelled out rather than counted: a fixture checked against a loop
                         // would agree with itself whatever numbers it held.
                         part_index: Some(0),
-                        blob_id: "blobA".into(),
+                        blob_id: Some("blobA".into()),
                         plaintext_len: 1_073_741_824,
                         sui_object_id: Some("0xabc".into()),
                         // Named outright — what every map written from now on looks like.
@@ -337,7 +337,7 @@ fn sample_manifest() -> RecoveryManifest {
                     },
                     Part {
                         part_index: Some(1),
-                        blob_id: "blobB".into(),
+                        blob_id: Some("blobB".into()),
                         plaintext_len: 1,
                         sui_object_id: None,
                         // Omitted — what every map written BEFORE the field looks like.
@@ -356,7 +356,7 @@ fn sample_manifest() -> RecoveryManifest {
                 content_hash: None,
                 parts: vec![Part {
                     part_index: Some(0),
-                    blob_id: "blobC".into(),
+                    blob_id: Some("blobC".into()),
                     plaintext_len: 12,
                     sui_object_id: None,
                     // A non-default name, so neither implementation can pass by hardcoding
@@ -364,8 +364,9 @@ fn sample_manifest() -> RecoveryManifest {
                     network: Some("filecoin".into()),
                 }],
                 quilt: Some(Quilt {
-                    quilt_blob_id: "quiltX".into(),
-                    patch_id: "patch7".into(),
+                    quilt_blob_id: Some("quiltX".into()),
+                    patch_id: Some("patch7".into()),
+            identifier: None,
                 }),
             },
         ],
@@ -465,13 +466,135 @@ fn manifest_still_parses_an_nrm1_document() {
 
 /// The version marker moved to 2 when `part_index` became required.
 #[test]
-fn manifest_version_is_two() {
+fn manifest_version_is_three() {
     // Pinned as a LITERAL, because every other test here compares against the constant and so
     // proves the number travels rather than what it is — and what it is carries the whole
     // compatibility story (RECOVERY-MANIFEST.md §6). Moving it means moving that section too.
-    assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION, 2);
-    // The threshold is a separate fact from "what we write", and stays 2 past the next bump.
+    assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION, 3);
+    // The thresholds are separate facts from "the newest we can write", and each stays put.
     assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION_WITH_PART_INDEX, 2);
+    assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION_WITH_OWN_QUILT, 3);
+}
+
+/// ⛔ A document only claims v3 when it USES v3, and this is the compatibility promise in one
+/// assertion: people are already holding builds of the recovery program that know nothing about
+/// the own-quilt form, and a `.nmtsmap` file they download tomorrow must still open in them.
+#[test]
+fn a_document_claims_the_version_its_contents_need_and_no_more() {
+    let absolute = sample_manifest();
+    assert_eq!(manifest::minimum_version(&absolute.items), 2);
+
+    let mut own = sample_manifest();
+    own.items[1].parts = vec![Part {
+        part_index: Some(0),
+        blob_id: None,
+        plaintext_len: 12,
+        sui_object_id: None,
+        network: Some("walrus".into()),
+    }];
+    own.items[1].quilt = Some(Quilt {
+        quilt_blob_id: None,
+        patch_id: None,
+        identifier: Some("55555555-5555-4555-8555-555555555555".into()),
+    });
+    assert_eq!(manifest::minimum_version(&own.items), 3);
+}
+
+/// The NRM-3 fixture parses, and BOTH placements in it resolve to what they say they are.
+///
+/// Reading only one of the two is the failure worth guarding: a recovery would return the older
+/// files and quietly lose the ones from the very upload the list rode along with.
+#[test]
+fn manifest_reads_both_placements_of_the_nrm3_fixture() {
+    let raw = include_bytes!("vectors/nrm3-sample.json");
+    let parsed = RecoveryManifest::from_json(raw).expect("the NRM-3 fixture must parse");
+    assert_eq!(parsed.v, 3);
+
+    let placements: Vec<_> = parsed
+        .items
+        .iter()
+        .map(|i| i.quilt.as_ref().and_then(Quilt::placement))
+        .collect();
+    assert_eq!(
+        placements[0],
+        Some(manifest::Placement::Absolute {
+            quilt_blob_id: "quiltX",
+            patch_id: "patch7"
+        })
+    );
+    assert_eq!(
+        placements[1],
+        Some(manifest::Placement::OwnQuilt {
+            identifier: "55555555-5555-4555-8555-555555555555"
+        })
+    );
+    // The own-quilt item names no blob, and that absence is the document being honest rather
+    // than incomplete: the blob did not exist yet when it was written.
+    assert!(parsed.items[1].parts[0].blob_id.is_none());
+
+    let emitted = parsed.to_json().unwrap();
+    assert_eq!(fixture_json(&emitted), fixture_json(raw));
+}
+
+/// Every way of writing a placement that a reader would have to guess about is refused.
+///
+/// Each case is a document that could be produced by an editing mistake or by tampering, and in
+/// every one of them the plausible guess fetches the wrong bytes. Refusing costs a person an
+/// error message; guessing costs them the file and tells them it worked.
+#[test]
+fn manifest_refuses_every_ambiguous_placement() {
+    let doc = |v: u32, parts: &str, quilt: &str| {
+        format!(
+            r#"{{"v":{v},"seq":1,"prev_manifest_blob_id":null,
+            "generated_at":"2026-08-17T00:00:00Z","account_id":"x","items":[
+            {{"id":"i","name":"n","path":"/","size":1,"dek":"d","kind":"file",
+              "parts":[{parts}],"quilt":{quilt}}}]}}"#
+        )
+        .into_bytes()
+    };
+    let one_part = r#"{"part_index":0,"plaintext_len":1}"#;
+    let one_part_with_blob = r#"{"part_index":0,"blob_id":"a","plaintext_len":1}"#;
+
+    // Half an absolute placement: a patch id with no quilt to look for it in.
+    let err = RecoveryManifest::from_json(&doc(3, one_part_with_blob, r#"{"patch_id":"p"}"#))
+        .unwrap_err();
+    assert!(matches!(err, ManifestError::QuiltFormUnclear { .. }), "{err}");
+
+    // Both forms at once — which one is the reader supposed to believe?
+    let both = r#"{"quilt_blob_id":"q","patch_id":"p","identifier":"x"}"#;
+    let err = RecoveryManifest::from_json(&doc(3, one_part_with_blob, both)).unwrap_err();
+    assert!(matches!(err, ManifestError::QuiltFormUnclear { .. }), "{err}");
+
+    // The v3 form inside a document that calls itself v2: an altered document, not an old one.
+    let err = RecoveryManifest::from_json(&doc(2, one_part, r#"{"identifier":"x"}"#)).unwrap_err();
+    assert!(matches!(err, ManifestError::OwnQuiltTooOld { v: 2, .. }), "{err}");
+
+    // Own-quilt AND a blob id: the form means "the blob is not named yet", so naming one is a
+    // contradiction, and picking either half would be inventing the answer.
+    let err =
+        RecoveryManifest::from_json(&doc(3, one_part_with_blob, r#"{"identifier":"x"}"#)).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ManifestError::OwnQuiltPartsWrong {
+                blob_id_present: true,
+                ..
+            }
+        ),
+        "{err}"
+    );
+
+    // Own-quilt across two parts: a quilted item is one patch in one blob.
+    let two = format!("{one_part},{}", r#"{"part_index":1,"plaintext_len":0}"#);
+    let err = RecoveryManifest::from_json(&doc(3, &two, r#"{"identifier":"x"}"#)).unwrap_err();
+    assert!(
+        matches!(err, ManifestError::OwnQuiltPartsWrong { parts: 2, .. }),
+        "{err}"
+    );
+
+    // A part with no blob id and no own-quilt placement has no address at all.
+    let err = RecoveryManifest::from_json(&doc(3, one_part, "null")).unwrap_err();
+    assert!(matches!(err, ManifestError::BlobIdMissing { position: 0, .. }), "{err}");
 }
 
 /// A `v: 2` document with a part that carries no `part_index` is refused.
@@ -671,7 +794,7 @@ fn manifest_omits_absent_optional_fields() {
             content_hash: None,
             parts: vec![Part {
                 part_index: Some(0),
-                blob_id: "b".into(),
+                blob_id: Some("b".into()),
                 plaintext_len: 0,
                 sui_object_id: None,
                 network: None,
@@ -1552,4 +1675,56 @@ fn wallets_are_numbered_by_one_rule() {
     // Two accounts never share a wallet.
     let other = kdf::derive_from_bytes(&[0x56u8; 20]).unwrap();
     assert_ne!(*other.wallet_seed_for(1), *one);
+}
+
+// ----- where the manifest sits on the storage network ---------------------------------
+
+#[test]
+fn a_manifests_patch_name_is_the_same_every_time_and_different_per_account() {
+    let a = kdf::derive_from_bytes(&[0x11u8; 20]).unwrap();
+    let b = kdf::derive_from_bytes(&[0x12u8; 20]).unwrap();
+
+    let name = manifest::recovery_patch_name(&a.data_key);
+    assert_eq!(
+        name,
+        manifest::recovery_patch_name(&a.data_key),
+        "a recovery would look in a different place each time it ran",
+    );
+    assert_ne!(
+        name,
+        manifest::recovery_patch_name(&b.data_key),
+        "two accounts sharing a name is how one person's tool finds another person's document",
+    );
+
+    // A one-bit difference in the key must not leave a name that looks related to the first.
+    let mut near = *a.data_key;
+    near[31] ^= 1;
+    assert_ne!(name, manifest::recovery_patch_name(&near));
+}
+
+#[test]
+fn a_manifests_patch_name_is_shaped_like_the_random_ids_beside_it() {
+    // Every other patch in the quilt is identified by a v4 UUID from the upload path. If this
+    // one is shaped differently, it announces which patch is worth attention — which is the
+    // whole thing deriving the name was meant to prevent.
+    let keys = kdf::derive_from_bytes(&[0x33u8; 20]).unwrap();
+    let name = manifest::recovery_patch_name(&keys.data_key);
+
+    let groups: Vec<&str> = name.split('-').collect();
+    assert_eq!(groups.len(), 5, "{name}");
+    assert_eq!(
+        groups.iter().map(|g| g.len()).collect::<Vec<_>>(),
+        vec![8, 4, 4, 4, 12],
+        "{name}",
+    );
+    assert!(
+        name.chars().all(|c| c.is_ascii_hexdigit() || c == '-'),
+        "{name}",
+    );
+    assert!(name.chars().all(|c| !c.is_ascii_uppercase()), "{name}");
+    assert_eq!(groups[2].as_bytes()[0], b'4', "version nibble: {name}");
+    assert!(
+        matches!(groups[3].as_bytes()[0], b'8' | b'9' | b'a' | b'b'),
+        "variant nibble: {name}",
+    );
 }

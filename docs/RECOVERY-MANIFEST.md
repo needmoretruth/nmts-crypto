@@ -7,8 +7,8 @@
 > **[`CRYPTO-FORMAT-NCF3.md`](CRYPTO-FORMAT-NCF3.md) §3** (the envelope this document's §1 uses).
 >
 > ⚠ **`v` is 2 as of 2026-07-29.** Every part now carries `part_index` and §2.1 states what a reader
-> MUST do with it. NRM-1 maps stay readable — see §6 for what changed, and for exactly what an NRM-1
-> map can and cannot promise a reader that an NRM-2 map can.
+> MUST do with it. NRM-1 lists stay readable — see §6 for what changed, and for exactly what an NRM-1
+> list can and cannot promise a reader that an NRM-2 list can.
 >
 > ⚠ **The JSON schema in §2 was unchanged by NCF-3; the ENCRYPTION in §1 was not.** NCF-3 replaced NCF-1
 > and NCF-2 outright on 2026-07-29 and renamed this envelope's AAD, so §1 and the sealed-hash note in
@@ -37,7 +37,7 @@ exists for. A product that counted it as durability would be measuring the wrong
 
 - The manifest is UTF-8 JSON encrypted as **one NCF-3 §3 envelope**: `E(dataKey, "nmts/v3/recovery-map", utf8(json))`.
   ⚠ **The AAD was renamed** from `nmts/v1/recovery-manifest` (NCF-3 §2.4: three different objects were
-  all called "manifest", and this one is the offline recovery MAP). The live constant is
+  all called "manifest", and this one is the offline recovery LIST). The live constant is
   `AAD_RECOVERY_MAP` in `crypto/src/wrap.rs`.
 - The envelope also gained a 32-byte key commitment (NCF-3 §3.2), so its overhead is
   `nonce(24) + commitment(32) + tag(16) = 72 bytes` rather than 40.
@@ -68,15 +68,19 @@ exists for. A product that counted it as durability would be measuring the wrong
       "parts": [                           // ordered; single-part files have exactly one entry
         {
           "part_index": 0,                 // REQUIRED from v2. where this part belongs — see §2.1
-          "blob_id": "<blob id, in this network's own naming>",
+          "blob_id": "<blob id, in this network's own naming>",  // absent ONLY for own-quilt (v3)
           "plaintext_len": 1073741824,
           "sui_object_id": "0x…",          // OPTIONAL. on-chain blob object; never needed to READ
           "network": "walrus"              // OPTIONAL on the wire. absent = "walrus" (bullets below)
         }
       ],
-      "quilt": {                           // present iff stored via a quilt cohort
-        "quilt_blob_id": "…",
+      "quilt": {                           // present iff stored via a quilt cohort. ONE of two forms:
+        "quilt_blob_id": "…",              //   ABSOLUTE — a quilt named outright
         "patch_id": "…"
+        // "identifier": "…"               //   OWN QUILT (v3) — "the quilt you read this document
+        //                                 //   from"; then the item has exactly one part and that
+        //                                 //   part has NO blob_id. See §6 for why. A record that is
+        //                                 //   neither form, or both, is refused.
       }
     }
   ]
@@ -142,7 +146,7 @@ For each item, a reader assembling a file MUST, for every position `i` from `0` 
    sealed `part_index` equals `i` **and** that its sealed `part_total` equals `parts.length`
    (CRYPTO-FORMAT-NCF3.md §4.1). The header fields are bound to the file key by the envelope's key
    commitment, so this is the only one of these checks that proves anything against an attacker who
-   wrote the map's plaintext — steps 2 and 4 compare the map against itself;
+   wrote the list's plaintext — steps 2 and 4 compare the list against itself;
 4. check `parts[i].plaintext_len` against the header's own length, and refuse on a mismatch;
 5. write the plaintext at that position, and **only after** steps 2–4 have passed for it.
 
@@ -157,8 +161,8 @@ download path in this codebase and had to be fixed there first.
 NRM-1 the field does not exist and its absence carries no information; in NRM-2 every part has one,
 so a part without it is a document that was altered, not an old one. Refuse the item.
 
-⚠ **What a writer can and cannot check.** The browser writes this map from the server's own dump of
-the storage layer and never fetches a blob while doing so, so it can only check the map against
+⚠ **What a writer can and cannot check.** The browser writes this list from the server's own dump of
+the storage layer and never fetches a blob while doing so, so it can only check the list against
 itself and against the sealed file list: that the numbering is a complete `0…n-1` run, and that the
 lengths add up to `size`. It cannot check that the blob listed at position `i` really holds part `i`
 — only step 3 above does that, and only at recovery time. `part_index` is recorded so that step 3
@@ -176,15 +180,15 @@ Two independent implementations produce/consume this document and they must not 
 The gate is the shared fixture **`nmts/crypto/tests/vectors/nrm2-sample.json`**: the Rust suite parses it
 into the expected structs, and the web unit suite asserts its builder emits the same document. Adding a
 field means touching both sides and that fixture in one change. **`nrm1-sample.json` sits beside it** and
-is not history: the Rust suite parses that one too, which is how "an NRM-1 map still opens" stays a
+is not history: the Rust suite parses that one too, which is how "an NRM-1 list still opens" stays a
 tested fact rather than a belief. The two fixtures differ in `v` and in `part_index` and in nothing else.
 
 **Where each side enforces what.** `part_index` is `Option<u64>` in Rust, not `u64` with a default — a
-default would turn "this map never recorded where the part goes" into "this part goes first", which is a
+default would turn "this list never recorded where the part goes" into "this part goes first", which is a
 claim nobody made and is wrong for every part after the first. `RecoveryManifest::from_json` is the one
 place that decides when absence is legal: required from `v: 2`, absent in `v: 1`, and a *stated* index
 that disagrees with its own array position is refused at either version. So after a successful parse,
-`None` means exactly what §6 says it means — the map cannot tell you where this part goes — and the
+`None` means exactly what §6 says it means — the list cannot tell you where this part goes — and the
 compiler makes the recovery tool confront that instead of reading a zero.
 
 The `size`-equals-the-sum rule of §2 is asymmetric on purpose, and the Rust side follows the wording:
@@ -208,7 +212,7 @@ person every other file in it.
 - Recovery precedence for the standalone tool: use the newest manifest available (highest `seq`); walk
   `prev_manifest_blob_id` only for diagnostics or to find blobs the newest manifest no longer lists.
 
-## 4. Deferred to P4 (mirror mechanics — constraints recorded now)
+## 4. The storage-network copy — SHIPPED 2026-08-17
 
 - **Who pays/signs each mirror refresh:** user-paid accounts fold the manifest write into the next
   cohort/part flush (same wallet signatures, near-zero marginal cost); voucher accounts are
@@ -217,23 +221,33 @@ person every other file in it.
 - **Expiry invariant:** a mirrored manifest's Walrus expiry MUST be ≥ the longest-lived file it describes;
   if it rides inside a cohort quilt whose expiry undershoots that, an additional dedicated mirror is
   required (lifecycle-engine rule, P4).
-- **The reason for the wait is spent.** It was deferred because the mirror's promise ("recoverable even
-  if you lose the file") could only be verified by a standalone recovery tool, and there was none — so
-  shipping the mirror first would have sold an unverifiable claim while charging two wallet signatures per
-  refresh for it. ⚠ **The tool was built on 2026-08-17 and is not published**: it went out without the
-  owner's approval and was withdrawn the same hour. It is being rebuilt to the owner's design and will
-  live at `github.com/needmoretruth/nmts-recovery`. The mirror opens when the tool actually ships. Nothing above was invalidated by the wait: `accounts.recovery_manifest_kind = 2`
-  and the `"walrus"` branch of `PUT /v1/account/recovery-map` are already built and tested.
+- ✅ **The reason for the wait is spent, and the copy shipped on 2026-08-17.** It was deferred because
+  the copy's promise ("recoverable even if you lose the file") could only be verified by a standalone
+  recovery tool, and there was none. The tool now lives at `github.com/needmoretruth/nmts-recovery` and
+  reads the copy with `--find`.
+- ⛔ **It is OFF unless the person turns it on** (owner, 2026-08-17). The storage is paid for out of
+  their own wallet, and a product may not spend somebody's money by omission. The screen recommends it
+  and states four things before it is switched on: what it costs now, what it costs to keep, that the
+  money goes to the storage network rather than to NMTS, and what it buys. The intention is
+  `accounts.recovery_network_copy`; what EXISTS stays `accounts.recovery_manifest_kind = 2`, and the two
+  are shown separately because they differ for anybody who switched it on and has not uploaded since.
 - ⭐ **The mirror buys more than "you can lose the file", and this is the part to design around.** Blob
   objects are transferred to the uploading wallet's own address, and that address derives from the account
-  code (§1.3 of the format document). So a mirrored map sitting at that same address is reachable from the
-  account code ALONE: derive the address, ask any full node what it owns, and recognise the map by
+  code (§1.3 of the format document). So a mirrored list sitting at that same address is reachable from the
+  account code ALONE: derive the address, ask any full node what it owns, and recognise the list by
   recomputing the envelope's key commitment. ⛔ An earlier note here proposed a SEPARATE recovery-only
   address for privacy; that argument is void, because the account's blob objects are already at the payment
-  address and the two histories are linked with or without the map.
-- ⚠ **A map folded into a cohort flush lags by one cohort** — it cannot name the blob ids of the very
-  upload it rides along with. Either accept the lag, or let the map omit blob ids and have the reader find
-  them on chain. That choice is the first fork in the work.
+  address and the two histories are linked with or without the list.
+- ✅ **The one-cohort lag is solved by NRM-3, not accepted.** A list folded into a cohort flush cannot
+  name the blob ids of the upload it rides along with — a quilt's blob id is a hash of its contents, this
+  document included, so there is no fixed point. NRM-3 adds the own-quilt placement (§6): the item says
+  "my patch is called X, in the quilt you found this document in", and the reader supplies the address it
+  fetched from. ⛔ Accepting the lag was the alternative, and it is empty for the person who uploads once
+  and never again — who is exactly who this exists for.
+- ⚠ **Two limits that remain, both stated on screen.** An account paying with a browser-extension wallet
+  or an imported key is not reachable this way (its address does not derive from the account code; the
+  recovery program takes the address by hand instead). And a file of 64 MiB or more is stored on its own
+  rather than in a quilt, so a list riding in a quilt does not travel with it.
 
 ## 5. The device-kept manifest file (`.nmtsmap`)
 
@@ -267,36 +281,70 @@ years later.
 
 ## 6. Version history
 
+### NRM-3 (2026-08-17) — the own-quilt placement
+
+**Added:** `quilt.identifier`, and `parts[].blob_id` became optional. **Changed:** `v` may be `3`.
+Nothing was removed or renamed.
+
+**The two placements.** A `quilt` record is exactly one of them, and a reader refuses anything that is
+neither or both:
+
+* **absolute** — `{quilt_blob_id, patch_id}`. Names a quilt anywhere on the network.
+* **own quilt** — `{identifier}`. Means "the quilt this document was read out of", with the patch named
+  by the identifier the writer chose. The item's single part carries NO `blob_id`; absence is legal
+  here and refused everywhere else.
+
+**Why it exists.** The storage-network copy of a list is written INTO the same quilt as the files it
+describes. That quilt's blob id is a hash of its contents — this document included — so the document
+cannot contain it. Without this form the copy would always be one upload behind, and for somebody who
+uploads once and never again, one upload behind is empty.
+
+**⚠ It is only meaningful to a reader that got the document out of a quilt.** A copy extracted to a
+file cannot resolve it, and both implementations say so rather than guessing: guessing would mean
+fetching some other quilt the account owns, which returns a stranger's ciphertext and fails as
+"damaged" — the wrong story entirely.
+
+**⭐ A WRITER STAMPS THE VERSION THE CONTENT NEEDS, not the newest one it knows.** People already hold
+copies of the standalone recovery program, and a build only knows the forms that existed when it was
+made. The file a person downloads is built after an upload has finished, so every placement in it is
+absolute and it is still a **v2 document** — every reader ever shipped goes on reading it. Only the
+storage-network copy reaches v3. (`minimum_version` in `crypto/src/manifest.rs`; `minimumVersion` in
+`web/src/lib/recovery/manifest-doc.ts`.)
+
+**And NRM-3 lists in a reader written before NRM-3?** They refuse them, and that is correct: such a
+reader would see a part with no `blob_id` and have no address for it. The refusal happens on the
+version marker, before any parsing — which is the whole reason the number moved.
+
 ### NRM-2 (2026-07-29) — `part_index` on every part
 
 **Added:** `part_index`, required on every entry of every item's `parts` array (§2). **Added:** §2.1,
 the reader's positional obligation. **Changed:** `v` is `2`. Nothing was removed or renamed.
 
-**Why it could not wait.** A map re-seals whenever it is rebuilt, but a person who builds one map and
+**Why it could not wait.** A list re-seals whenever it is rebuilt, but a person who builds one list and
 never rebuilds keeps that one for as long as they keep the file — which is the entire point of the
 artefact. So a field that a recovery years from now depends on has to be in the format before the
 format freezes at the mainnet cutover, not after. What forced it was an adversarial review of this
-path (2026-07-29): a map is built from the server's own dump, the
+path (2026-07-29): a list is built from the server's own dump, the
 builder never fetches a blob, and before this change nothing in the document said where a part
-belonged. A hostile server could permute or drop parts, the map would seal and report itself as good
+belonged. A hostile server could permute or drop parts, the list would seal and report itself as good
 — the byte total shown to the user is summed from the sealed file list, so it looks right even when a
 part is missing — and the failure would surface years later, at the one moment it cannot be repaired.
 
 **Why the version number moved for one additive field.** So that its absence means something. In an
-NRM-1 map a part has no index and a reader has nothing to check the order against; in an NRM-2 map
+NRM-1 list a part has no index and a reader has nothing to check the order against; in an NRM-2 list
 every part has one, so a part missing it is an altered document. Without the bump, deleting the field
 from every part would be a silent downgrade to NRM-1's guarantees and no reader could tell.
 
-**Are NRM-1 maps still readable? Yes, unchanged.** A reader MUST keep parsing them: the fields NRM-1
-defines mean exactly what they meant, `parts` is still in order, and a map somebody downloaded in
+**Are NRM-1 lists still readable? Yes, unchanged.** A reader MUST keep parsing them: the fields NRM-1
+defines mean exactly what they meant, `parts` is still in order, and a list somebody downloaded in
 2026 is the only copy they have. What a reader MUST NOT do is pretend it performed §2.1 on one. On an
-NRM-1 map, steps 1, 3, 4 and 5 of §2.1 still apply in full — the sealed NCF-3 headers carry
-`part_index` and `part_total` regardless of the map's version, so a reader that fetches blobs can
-still refuse a permutation. Only step 2, the map's own statement of placement, is unavailable: an
-NRM-1 map cannot be checked against itself before any network I/O, and a reader must treat its array
+NRM-1 list, steps 1, 3, 4 and 5 of §2.1 still apply in full — the sealed NCF-3 headers carry
+`part_index` and `part_total` regardless of the list's version, so a reader that fetches blobs can
+still refuse a permutation. Only step 2, the list's own statement of placement, is unavailable: an
+NRM-1 list cannot be checked against itself before any network I/O, and a reader must treat its array
 order as a claim it has not yet verified rather than as a fact.
 
-**And NRM-2 maps in a reader written before NRM-2?** They parse. Such a reader ignores fields it does
+**And NRM-2 lists in a reader written before NRM-2?** They parse. Such a reader ignores fields it does
 not know and never looked at `v`, so it sees precisely the NRM-1 view and behaves as it always did.
 That is a property of that reader, not a promise the format makes — a future version that removes or
 repurposes a field would break it, which is why the version number is there to be checked. The

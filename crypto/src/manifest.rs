@@ -1,4 +1,4 @@
-//! Recovery manifest (NRM-2, `docs/RECOVERY-MANIFEST.md`): the encrypted index that makes
+//! Recovery manifest (NRM-3, `docs/RECOVERY-MANIFEST.md`): the encrypted index that makes
 //! every file recoverable with only the account code and Walrus, and zero NMTS infrastructure.
 //!
 //! # Purpose
@@ -20,12 +20,26 @@
 //! intervening delete dropped from the current index. `seq` — not the timestamp — decides
 //! which of two reachable manifests wins; clocks on the writing device are not trustworthy.
 //!
+//! # Where the manifest itself lives (NRM-3, 2026-08-17)
+//! A manifest is written in two places and they are not the same document twice. The FILE a
+//! person downloads is built after an upload has finished, so every blob it names exists. The
+//! STORAGE-NETWORK copy is written INTO the quilt whose files it describes, before that quilt has
+//! a blob id — a quilt's id is a hash of its contents, this document included, so there is no
+//! fixed point to wait for. NRM-3 adds the one form that makes that expressible: an item may say
+//! "my patch is called X, in the quilt you found this document in" ([`Placement::OwnQuilt`]).
+//!
+//! ⚠ That form is only meaningful to a reader that got the document out of a quilt. A copy
+//! extracted to a file cannot resolve it, and this crate says so rather than guessing.
+//!
+//! [`minimum_version`] is what a writer stamps, so a document that uses no v3 form is still a v2
+//! document and every recovery tool already in circulation goes on reading it.
+//!
 //! # Part placement (NRM-2)
 //! Every part of every item carries a `part_index` saying where it belongs, and this module
 //! refuses a v2 document whose parts do not each sit at the position they claim
 //! (RECOVERY-MANIFEST.md §2.1). The field exists because array order alone cannot be
-//! CHECKED: the map is built from the storage layer's own dump, the builder never fetches a
-//! blob, so before NRM-2 a map that listed a file's parts in the wrong order read exactly
+//! CHECKED: the list is built from the storage layer's own dump, the builder never fetches a
+//! blob, so before NRM-2 a list that listed a file's parts in the wrong order read exactly
 //! like a correct one and the mistake surfaced years later, in a recovery, at the one moment
 //! it could not be repaired. An adversarial review of the recovery-map path found it (2026-07-29).
 //!
@@ -42,24 +56,28 @@
 //! crypto worker and never crosses to the main thread in the clear) — these structs are what
 //! the standalone recovery tool parses, which makes them the two ends of one wire format.
 //! `tests/vectors/nrm2-sample.json` is the shared fixture that keeps the two ends honest
-//! (this crate parses it, and the web unit tests assert their builder emits exactly it), and
-//! `tests/vectors/nrm1-sample.json` is kept beside it so the one-version-back document stays
-//! parseable rather than merely believed to be.
+//! (this crate parses it, and the web unit tests assert their builder emits exactly it);
+//! `nrm3-sample.json` does the same for the own-quilt form, and `nrm1-sample.json` is kept beside
+//! them so the older documents stay parseable rather than merely believed to be.
 //! Optional fields (`quilt`, `content_hash`, `sui_object_id`, `network`) are omitted when absent
 //! so byte output stays canonical; `prev_manifest_blob_id` is the deliberate exception (see below).
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use crate::framing::MAGIC;
 use crate::wrap::{self, WrapError, AAD_RECOVERY_MAP};
 
-/// The manifest format version (`"v"` field) this crate writes.
+/// The newest manifest format version (`"v"` field) this crate writes and understands.
 ///
-/// Raised 1 → 2 on 2026-07-29 when `part_index` became required on every part
-/// (`docs/RECOVERY-MANIFEST.md` §6). The number moved for a single additive field so that the
-/// field's ABSENCE means something: see [`MANIFEST_VERSION_WITH_PART_INDEX`].
-pub const MANIFEST_VERSION: u32 = 2;
+/// Raised 1 → 2 on 2026-07-29 when `part_index` became required on every part, and 2 → 3 on
+/// 2026-08-17 when [`Quilt`] gained the own-quilt placement (`docs/RECOVERY-MANIFEST.md` §6).
+/// Each number moved for a single additive form so that the form's ABSENCE means something: see
+/// [`MANIFEST_VERSION_WITH_PART_INDEX`] and [`MANIFEST_VERSION_WITH_OWN_QUILT`].
+///
+/// ⚠ **A writer stamps [`minimum_version`], not this.** See that function for why.
+pub const MANIFEST_VERSION: u32 = 3;
 
 /// The first NRM version in which `part_index` is required on every part.
 ///
@@ -68,6 +86,94 @@ pub const MANIFEST_VERSION: u32 = 2;
 /// version does an absent `part_index` mean a tampered document rather than an old one", and
 /// the answer stays `2` however far the format version travels past it.
 pub const MANIFEST_VERSION_WITH_PART_INDEX: u32 = 2;
+
+/// The first NRM version in which [`Quilt`] may carry the own-quilt placement.
+pub const MANIFEST_VERSION_WITH_OWN_QUILT: u32 = 3;
+
+/// The lowest `v` a document holding these items may honestly declare.
+///
+/// # Why a writer stamps this instead of [`MANIFEST_VERSION`]
+/// People already hold copies of the standalone recovery program, and a build only knows the
+/// forms that existed when it was made. A document stamped `v: 3` for no reason other than the
+/// calendar would be refused — or, worse, read cautiously — by a tool that would have understood
+/// every byte of it. Stamping the version the CONTENT actually needs means a `.nmtsmap` file
+/// saved today is still a v2 document unless it uses a v3 form, and every tool ever shipped goes
+/// on reading it.
+///
+/// In practice only the storage-network copy reaches v3, because it is the only document written
+/// before its own quilt existed. The file a person downloads is built from a finished upload, so
+/// every placement in it is absolute.
+pub fn minimum_version(items: &[Item]) -> u32 {
+    if items
+        .iter()
+        .filter_map(|item| item.quilt.as_ref())
+        .any(|q| q.identifier.is_some())
+    {
+        MANIFEST_VERSION_WITH_OWN_QUILT
+    } else {
+        MANIFEST_VERSION_WITH_PART_INDEX
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Where the manifest sits on the storage network (NCF-3 §2.3, RECOVERY-MANIFEST.md §7)
+// ---------------------------------------------------------------------------------------
+
+/// Hash domain separator for the manifest's quilt patch name.
+pub const HASH_RECOVERY_NAME: &[u8] = b"nmts/v3/recovery-name";
+
+/// Bytes of the fingerprint that become the patch name. 122 bits survive the UUID bits below.
+const RECOVERY_PATCH_NAME_LEN: usize = 16;
+
+/// The name a manifest is stored under inside a quilt, derived from the account's `dataKey`.
+///
+/// # Why a name has to be derived at all
+/// A blob id on Walrus is computed from the blob's own bytes, so nothing can predict one from an
+/// account code — it changes every time the drive does, and it is not ours to choose. What IS
+/// ours to choose is the *identifier* each patch carries inside a quilt. Deriving that identifier
+/// from `dataKey` gives the one property the whole "recover with the account code alone" path
+/// needs: a tool holding the code can compute the exact name to ask an aggregator for, and can do
+/// it before it has ever seen the account's data.
+///
+/// # Why it is derived rather than a fixed word
+/// A constant like `nmts-recovery-list` would work identically for recovery and would also let
+/// anyone reading public storage pick NMTS accounts out of the crowd — patch identifiers travel
+/// in the clear inside a quilt's index. Deriving it means the name is unguessable to everyone who
+/// does not already hold the key that opens the document the name points at.
+///
+/// # Why it looks like a UUID
+/// Every other patch in the same quilt is identified by a random v4 UUID (the upload path's
+/// per-item client id). A 22-character base64url string beside them would announce itself as the
+/// odd one out and undo the paragraph above, so the fingerprint is rendered in the same shape,
+/// version and variant bits included. This costs six bits of the 128; matching a *specific*
+/// account's name still means finding a preimage of a 122-bit value, which is not an attack.
+///
+/// # What this does NOT hide
+/// The blob object holding the quilt is owned by the wallet that paid for it, and that wallet is
+/// derived from the same account code (§1.3). Anyone who already knows an account's wallet
+/// address can therefore see how many quilts it holds and when — this name hides *which patch is
+/// the manifest*, not *that the account exists*.
+pub fn recovery_patch_name(data_key: &[u8; 32]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(HASH_RECOVERY_NAME);
+    hasher.update(data_key);
+    let digest = hasher.finalize();
+    let mut b = [0u8; RECOVERY_PATCH_NAME_LEN];
+    b.copy_from_slice(&digest[..RECOVERY_PATCH_NAME_LEN]);
+    // RFC 9562 §4.4: version in the high nibble of byte 6, variant in the top bits of byte 8.
+    // Set so the value is indistinguishable from the random UUIDs beside it in the quilt index.
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    let hex: String = b.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
 
 /// Errors from manifest (de)serialization and (de)cryption.
 #[derive(Debug, thiserror::Error)]
@@ -112,6 +218,57 @@ pub enum ManifestError {
         /// The `part_index` the part claimed.
         stated: u64,
     },
+    /// A `quilt` record was neither of the two placements NRM-3 defines, or was both at once.
+    ///
+    /// The two forms answer different questions and a reader cannot be left to guess which was
+    /// meant: `{quilt_blob_id, patch_id}` names a quilt anywhere on the network, while
+    /// `{identifier}` means "the quilt this document itself was read out of". A record carrying
+    /// pieces of both, or neither, is not a placement.
+    #[error("item {item_id}: the quilt record is neither an absolute placement nor an own-quilt one")]
+    QuiltFormUnclear {
+        /// The item's NMTS id.
+        item_id: String,
+    },
+    /// A document older than NRM-3 used the own-quilt placement.
+    ///
+    /// Same reasoning as [`Self::PartIndexMissing`]: the version marker is what makes a form's
+    /// presence mean something, and a v2 document that quietly uses a v3 form is an altered one.
+    #[error("item {item_id}: an own-quilt placement needs v{needed}, but the document says v{v}")]
+    OwnQuiltTooOld {
+        /// The item's NMTS id.
+        item_id: String,
+        /// The `v` the document declared.
+        v: u32,
+        /// The first version in which the form exists.
+        needed: u32,
+    },
+    /// A part carried no `blob_id` and its item is not placed in the document's own quilt.
+    ///
+    /// Absence is legal in exactly one situation — the bytes are in the quilt this document was
+    /// read from, whose id the document cannot contain — and anywhere else it is a part with no
+    /// address at all.
+    #[error("item {item_id}: the part at position {position} has no blob_id and no own-quilt placement")]
+    BlobIdMissing {
+        /// The item's NMTS id.
+        item_id: String,
+        /// Position in the item's `parts` array.
+        position: usize,
+    },
+    /// An own-quilt item did not consist of exactly one part carrying no `blob_id`.
+    ///
+    /// A quilted item is one patch inside one blob, so it has exactly one part; and that part
+    /// cannot also name a blob, because the whole meaning of the form is that the writer did not
+    /// yet know which blob it would be. Either mistake is a contradiction, and resolving a
+    /// contradiction on the reader's behalf is how a wrong file gets written confidently.
+    #[error("item {item_id}: an own-quilt item must be exactly one part with no blob_id, found {parts} part(s){}", if *.blob_id_present { " naming a blob" } else { "" })]
+    OwnQuiltPartsWrong {
+        /// The item's NMTS id.
+        item_id: String,
+        /// How many parts the item listed.
+        parts: usize,
+        /// Whether one of them also carried a `blob_id`.
+        blob_id_present: bool,
+    },
     /// An item's parts do not add up to the item's `size` — refused on the WRITE path.
     ///
     /// RECOVERY-MANIFEST.md §2 makes this a writer MUST and a reader MAY, and this crate
@@ -140,14 +297,14 @@ pub struct Part {
     /// # Why this is an `Option` and not a `u64`
     /// These structs both WRITE v2 documents and READ documents that may be v1, and the two
     /// versions disagree about whether the field exists. A `u64` with a serde default would
-    /// turn "this map never recorded where the part goes" into "this part goes first" — a
+    /// turn "this list never recorded where the part goes" into "this part goes first" — a
     /// claim nobody made, indistinguishable at the type level from one somebody did, and
     /// wrong for every part after the first. `Option` makes absence representable, so the
     /// decision about when absence is legal is taken in exactly one place
     /// ([`RecoveryManifest::from_json`]) instead of being smuggled in by a default.
     ///
     /// The payoff lands on the recovery tool. After a successful parse, `None` here means
-    /// precisely "this map cannot tell you where this part goes" — RECOVERY-MANIFEST.md §6's
+    /// precisely "this list cannot tell you where this part goes" — RECOVERY-MANIFEST.md §6's
     /// "a reader must treat its array order as a claim it has not yet verified" — and the
     /// compiler makes the tool confront that instead of reading a zero.
     ///
@@ -155,7 +312,17 @@ pub struct Part {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub part_index: Option<u64>,
     /// Blob ID holding this part's NCF-3 stream, in [`Part::network_name`]'s own naming.
-    pub blob_id: String,
+    ///
+    /// # Why this became an `Option` in NRM-3
+    /// There is exactly one situation in which a writer cannot know it: the bytes are going into
+    /// the same quilt this document is being written into, and a quilt's blob id is computed from
+    /// its contents — including this document. The circle has no fixed point, so the placement is
+    /// recorded as [`Quilt::identifier`] instead and the address is supplied by whoever fetched
+    /// the document. Everywhere else absence is refused at parse time
+    /// ([`ManifestError::BlobIdMissing`]), so a reader that has a `Some` here has one because the
+    /// document really did name a blob.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub blob_id: Option<String>,
     /// Plaintext byte length of this part.
     pub plaintext_len: u64,
     /// Which storage network holds `blob_id` — a NAME (`"walrus"`), never a code.
@@ -196,12 +363,76 @@ impl Part {
 }
 
 /// Optional quilt placement, present iff the item was stored via a quilt batch.
+///
+/// # Two forms, one of which is new in NRM-3
+/// * **Absolute** — `quilt_blob_id` + `patch_id`. Names a quilt anywhere on the network. This is
+///   every placement a document built from the server's own dump can carry, because by then the
+///   upload has finished and both values exist.
+/// * **Own quilt** — `identifier` alone. Means "the quilt this document was read out of". It
+///   exists because the storage-network copy of a manifest is written INTO the same quilt as the
+///   files it is describing, and that quilt's blob id is a hash of its contents, this document
+///   included. Without this form the network copy would always be one upload behind — and for
+///   somebody who uploads once and never again, one upload behind is empty.
+///
+/// A record is exactly one of the two. [`Quilt::placement`] is the only way to read it, and
+/// [`RecoveryManifest::from_json`] refuses anything that is neither.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Quilt {
-    /// The quilt's Walrus blob ID.
-    pub quilt_blob_id: String,
-    /// The patch ID identifying this item within the quilt.
-    pub patch_id: String,
+    /// The quilt's Walrus blob ID. Absent in the own-quilt form.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub quilt_blob_id: Option<String>,
+    /// The patch ID identifying this item within the quilt. Absent in the own-quilt form.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub patch_id: Option<String>,
+    /// The patch's identifier inside the quilt this document was read from (NRM-3).
+    ///
+    /// A patch identifier is chosen by the writer before the quilt is encoded, which is precisely
+    /// why it can be recorded when the patch id cannot: the patch id is derived from the quilt's
+    /// blob id and the identifier is not.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub identifier: Option<String>,
+}
+
+/// Where an item's bytes are, as [`Quilt`] states it. Borrowed — no allocation to read a record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement<'a> {
+    /// A quilt named outright.
+    Absolute {
+        /// The quilt's blob id.
+        quilt_blob_id: &'a str,
+        /// The patch id within it.
+        patch_id: &'a str,
+    },
+    /// The quilt this document itself was read out of, patch named by its identifier.
+    ///
+    /// ⚠ A reader that did NOT get this document from a quilt cannot resolve this — the document
+    /// is describing a place relative to where it was found. That is not a defect to work around
+    /// with a guess; it is a document being read somewhere it cannot mean anything.
+    OwnQuilt {
+        /// The patch's identifier inside that quilt.
+        identifier: &'a str,
+    },
+}
+
+impl Quilt {
+    /// Which of the two forms this record is, or `None` when it is neither.
+    ///
+    /// Callers reach the fields through this rather than reading them directly, so "exactly one
+    /// form" is decided once instead of at every use site.
+    pub fn placement(&self) -> Option<Placement<'_>> {
+        match (
+            self.quilt_blob_id.as_deref(),
+            self.patch_id.as_deref(),
+            self.identifier.as_deref(),
+        ) {
+            (Some(quilt_blob_id), Some(patch_id), None) => Some(Placement::Absolute {
+                quilt_blob_id,
+                patch_id,
+            }),
+            (None, None, Some(identifier)) => Some(Placement::OwnQuilt { identifier }),
+            _ => None,
+        }
+    }
 }
 
 /// A single recoverable item (file).
@@ -267,7 +498,7 @@ pub struct RecoveryManifest {
     ///
     /// Read on the way in: it is what decides whether a part may omit its `part_index`, so a
     /// parser that ignored it would accept an NRM-2 document stripped of every placement and
-    /// call it an old map (RECOVERY-MANIFEST.md §6).
+    /// call it an old list (RECOVERY-MANIFEST.md §6).
     pub v: u32,
     /// Monotonic per account, +1 for every manifest written (NRM §2). The recovery tool
     /// picks the HIGHEST `seq` it can reach as the authoritative index.
@@ -297,13 +528,16 @@ impl RecoveryManifest {
     /// Refuses a document a reader would have to refuse, and additionally refuses one that
     /// breaks a rule RECOVERY-MANIFEST.md §2 puts on writers only:
     ///
-    /// * part placement — the same check [`Self::from_json`] performs, so this crate can never
-    ///   seal a map it would then decline to open;
+    /// * part placement and quilt placement — the same checks [`Self::from_json`] performs, so
+    ///   this crate can never seal a list it would then decline to open;
+    /// * the declared `v` against [`minimum_version`] — a document that uses a form its own
+    ///   version does not admit is one this crate would refuse on the way back in;
     /// * `size` against the sum of the parts' `plaintext_len` — a writer MUST refuse an item
     ///   where those disagree. It is asymmetric on purpose: see [`Item::parts_add_up`] for why
     ///   a reader is offered the same question instead of being stopped by it.
     pub fn to_json(&self) -> Result<Vec<u8>, ManifestError> {
         self.check_part_placement()?;
+        self.check_quilt_placement()?;
         for item in &self.items {
             if !item.parts_add_up() {
                 return Err(ManifestError::PartsDoNotAddUp {
@@ -321,6 +555,7 @@ impl RecoveryManifest {
     pub fn from_json(bytes: &[u8]) -> Result<Self, ManifestError> {
         let manifest: Self = serde_json::from_slice(bytes)?;
         manifest.check_part_placement()?;
+        manifest.check_quilt_placement()?;
         Ok(manifest)
     }
 
@@ -332,9 +567,9 @@ impl RecoveryManifest {
     ///    contradicts itself cannot be acted on, and picking one of the two numbers to believe
     ///    would be inventing an answer on the reader's behalf.
     /// 2. **From [`MANIFEST_VERSION_WITH_PART_INDEX`] — it must be stated at all.** The version
-    ///    marker is the whole reason the field's absence carries information: in an NRM-1 map a
+    ///    marker is the whole reason the field's absence carries information: in an NRM-1 list a
     ///    part has no index and the reader simply has nothing to check the order against, while
-    ///    in a map that calls itself NRM-2 a part without one is an altered document rather
+    ///    in a list that calls itself NRM-2 a part without one is an altered document rather
     ///    than an old one. Refusing it is what stops stripping the field from being a silent
     ///    downgrade to NRM-1's guarantees (RECOVERY-MANIFEST.md §6).
     ///
@@ -369,6 +604,65 @@ impl RecoveryManifest {
                         })
                     }
                     None => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The one place that decides which quilt placement a document of this version may use.
+    ///
+    /// Four refusals, each for its own reason:
+    ///
+    /// 1. **A `quilt` record must be exactly one of the two forms.** Neither, or a mixture, is
+    ///    not a placement, and choosing one on the reader's behalf invents an address.
+    /// 2. **Own-quilt needs [`MANIFEST_VERSION_WITH_OWN_QUILT`].** The version marker is what
+    ///    makes the form's presence mean something; a v2 document using a v3 form was altered.
+    /// 3. **An own-quilt item is exactly one part carrying no `blob_id`.** A quilted item is one
+    ///    patch in one blob, and the form's whole meaning is that the blob was not yet named.
+    /// 4. **Every other part names a blob.** Absence is legal in one situation only, and that
+    ///    situation is rule 3.
+    fn check_quilt_placement(&self) -> Result<(), ManifestError> {
+        let own_quilt_allowed = self.v >= MANIFEST_VERSION_WITH_OWN_QUILT;
+        for item in &self.items {
+            let own_quilt = match item.quilt.as_ref() {
+                None => false,
+                Some(quilt) => match quilt.placement() {
+                    None => {
+                        return Err(ManifestError::QuiltFormUnclear {
+                            item_id: item.id.clone(),
+                        })
+                    }
+                    Some(Placement::Absolute { .. }) => false,
+                    Some(Placement::OwnQuilt { .. }) if !own_quilt_allowed => {
+                        return Err(ManifestError::OwnQuiltTooOld {
+                            item_id: item.id.clone(),
+                            v: self.v,
+                            needed: MANIFEST_VERSION_WITH_OWN_QUILT,
+                        })
+                    }
+                    Some(Placement::OwnQuilt { .. }) => true,
+                },
+            };
+
+            if own_quilt {
+                let blob_id_present = item.parts.iter().any(|p| p.blob_id.is_some());
+                if item.parts.len() != 1 || blob_id_present {
+                    return Err(ManifestError::OwnQuiltPartsWrong {
+                        item_id: item.id.clone(),
+                        parts: item.parts.len(),
+                        blob_id_present,
+                    });
+                }
+                continue;
+            }
+
+            for (position, part) in item.parts.iter().enumerate() {
+                if part.blob_id.is_none() {
+                    return Err(ManifestError::BlobIdMissing {
+                        item_id: item.id.clone(),
+                        position,
+                    });
                 }
             }
         }

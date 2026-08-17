@@ -4,7 +4,7 @@
 //! One small AEAD envelope encrypts everything that is not bulk file data:
 //! * the per-file **DEK**, wrapped under the account `dataKey`;
 //! * encrypted item **names** and folder-path **metadata**;
-//! * the **recovery map** (handled in [`crate::manifest`], reusing this envelope);
+//! * the **recovery list** (handled in [`crate::manifest`], reusing this envelope);
 //! * the sealed **file list** and every share-side object.
 //!
 //! # Envelope format (NCF-3 — re-freezes at the mainnet cutover)
@@ -89,10 +89,10 @@ pub const AAD_DEK_WRAP: &[u8] = b"nmts/v3/dek-wrap";
 pub const AAD_NAME: &[u8] = b"nmts/v3/name";
 /// AAD for encrypted folder-path metadata.
 pub const AAD_META: &[u8] = b"nmts/v3/meta";
-/// AAD for the recovery MAP (used by [`crate::manifest`]).
+/// AAD for the recovery LIST (used by [`crate::manifest`]).
 ///
 /// Renamed from `recovery-manifest` in NCF-3: three unrelated objects were called "manifest"
-/// (this map, the sealed file list, and the key that opens it), which is the kind of ambiguity
+/// (this list, the sealed file list, and the key that opens it), which is the kind of ambiguity
 /// that makes a domain-separator mistake invisible. See NCF-3 §2.4.
 pub const AAD_RECOVERY_MAP: &[u8] = b"nmts/v3/recovery-map";
 /// AAD for an encrypted whole-file plaintext content hash. Domain-separated from every other AAD

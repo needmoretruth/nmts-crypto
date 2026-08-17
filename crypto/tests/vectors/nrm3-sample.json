@@ -1,0 +1,68 @@
+{
+  "_comment": [
+    "SHARED FIXTURE (NRM-3) — two independent implementations must agree on this document.",
+    "  Rust  : nmts/crypto/tests/api.rs            (what the standalone recovery tool parses)",
+    "  Web   : nmts/web/test/recovery-map.test.ts  (what the browser writes)",
+    "Keys beginning with _ are documentation and are ignored by both parsers.",
+    "WHAT NRM-3 ADDS, and why this fixture exists beside nrm2-sample.json rather than replacing",
+    "it: a manifest is written in two places and they are not the same document twice. The FILE a",
+    "person downloads is built after an upload finished, so every blob it names already exists —",
+    "that document is still NRM-2 and every recovery tool ever shipped reads it. The",
+    "STORAGE-NETWORK copy is written INTO the quilt it describes, and a quilt's blob id is a hash",
+    "of its contents, this document included, so the writer cannot name it. The own-quilt form is",
+    "how that is said: 'my patch is called X, in the quilt you found this document in'.",
+    "This document therefore mixes BOTH forms on purpose — one item from an earlier upload whose",
+    "quilt is named outright, and one from the very upload this manifest is riding in. A reader",
+    "that resolves only one of the two passes half of a recovery and fails the other half years",
+    "later, which is exactly the failure the fixture is here to make loud now.",
+    "Note the own-quilt item has exactly ONE part and that part carries NO blob_id: a quilted item",
+    "is one patch in one blob, and naming a blob would contradict the form's whole meaning. Both",
+    "sides must REFUSE a document that breaks either rule."
+  ],
+  "v": 3,
+  "seq": 13,
+  "prev_manifest_blob_id": "prevManifestBlob",
+  "generated_at": "2026-08-17T00:00:00Z",
+  "account_id": "abcdEFGH1234-_wx",
+  "items": [
+    {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "name": "earlier.txt",
+      "path": "/docs",
+      "size": 12,
+      "dek": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      "kind": "file",
+      "content_hash": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      "parts": [
+        {
+          "part_index": 0,
+          "blob_id": "quiltX",
+          "plaintext_len": 12,
+          "sui_object_id": "0xabc",
+          "network": "walrus"
+        }
+      ],
+      "quilt": {
+        "quilt_blob_id": "quiltX",
+        "patch_id": "patch7"
+      }
+    },
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "name": "just-uploaded.bin",
+      "path": "/",
+      "size": 5,
+      "dek": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+      "kind": "file",
+      "parts": [
+        {
+          "part_index": 0,
+          "plaintext_len": 5
+        }
+      ],
+      "quilt": {
+        "identifier": "55555555-5555-4555-8555-555555555555"
+      }
+    }
+  ]
+}

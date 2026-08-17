@@ -48,7 +48,7 @@ the second adversarial review found it on 2026-07-29, once A1–A5 were already 
 | **A4** | A multi-part file's parts carry **no part number and no part count** in their headers. All parts of one file share one DEK. | The server can reorder parts, drop the tail, or replay an old part. Every chunk still authenticates, because each part's AAD covers only its own header. |
 | **A5** | The AEAD is **not key-committing**. | One ciphertext can be constructed to decrypt to two different plaintexts under two different keys. Public links hand the DEK to the recipient, so "this ciphertext is that file" is a claim anyone can dispute. This matters for abuse reports and for any legal process that asks what a stored blob actually is. |
 | **A6** | A share envelope authenticates the DEK, and since §5.5 the sender — and **nothing about which file that DEK belongs to**. The item id, the sealed name and the sealed content digest are server columns stored beside it. | A share wraps the file's **own** DEK, so every co-recipient of that file holds it. One of them, together with a server willing to rewrite a row, can leave the genuine envelope untouched and replace only the columns beside it with values sealed under that same DEK. The recipient then sees an attacker-chosen file attributed to a sender whose authentication **passed**, and the download's content-digest check passes too, because the digest was replaced in the same breath. |
-| **N1** | The word **`manifest`** names three unrelated objects: the recovery map (`nmts/v1/recovery-manifest`), the sealed file list (`nmts/v2/manifest`), and the key that opens the file list (`nmts/v2/manifest-key`). | Not a vulnerability. It is the reason a reader has to hold three meanings at once, and domain-separator mistakes are exactly the class of bug that is invisible until it is catastrophic. |
+| **N1** | The word **`manifest`** names three unrelated objects: the recovery list (`nmts/v1/recovery-manifest`), the sealed file list (`nmts/v2/manifest`), and the key that opens the file list (`nmts/v2/manifest-key`). | Not a vulnerability. It is the reason a reader has to hold three meanings at once, and domain-separator mistakes are exactly the class of bug that is invisible until it is catastrophic. |
 
 ### 0.2 Why nothing is migrated
 
@@ -191,7 +191,7 @@ against this section; adding a separator without adding the row fails that test.
 | `nmts/v3/name` | `dataKey` | An item name (UTF-8) |
 | `nmts/v3/meta` | `dataKey` | Folder-path metadata (JSON) |
 | `nmts/v3/content-hash` | `dataKey` | SHA-256 of a whole file's plaintext |
-| `nmts/v3/recovery-map` | `dataKey` | The recovery map (**N1**: was `recovery-manifest`) |
+| `nmts/v3/recovery-map` | `dataKey` | The recovery list (**N1**: was `recovery-manifest`) |
 | `nmts/v3/file-list` | `fileListKey` | The sealed file list (**N1**: was `manifest`) |
 | `nmts/v3/share-wrap` | X-Wing shared secret | A DEK wrapped to one recipient |
 | `nmts/v3/share-name` | the file DEK | An item name re-sealed for a recipient |
@@ -208,6 +208,7 @@ against this section; adding a separator without adding the row fails that test.
 | `nmts/v3/share-address` | Share address = fingerprint of the identity root (§5.2) |
 | `nmts/v3/share-payload` | Commitment over the row a share envelope is stored beside (§5.3, **A6**) |
 | `nmts/v3/identity-bundle` | FIPS 204 signature context (`ctx`) of the identity self-signature (§5.2a) |
+| `nmts/v3/recovery-name` | The name the recovery manifest is stored under inside a quilt (§2.5) |
 
 ### 2.4 What N1 fixed
 
@@ -216,9 +217,47 @@ gone from the code as well as this table:
 
 | Was | Is | What it actually is |
 |---|---|---|
-| `nmts/v1/recovery-manifest` | `nmts/v3/recovery-map` | The offline recovery map file |
+| `nmts/v1/recovery-manifest` | `nmts/v3/recovery-map` | The offline recovery list file |
 | `nmts/v2/manifest` | `nmts/v3/file-list` | The sealed list of items in the drive |
 | `nmts/v2/manifest-key` | `nmts/v3/file-list-key` | The key that opens that list |
+
+### 2.5 The one public name derived from a key (added 2026-08-17)
+
+```text
+recovery_patch_name = uuid_form( SHA-256("nmts/v3/recovery-name" || dataKey)[0..16] )
+```
+
+**This is not a key and nothing is sealed with it.** It is a public label, and it is here for the
+same reason `nmts/v3/share-address` is: a value computed from a secret, published in the clear,
+and therefore subject to the same no-reuse rule as everything else in this registry.
+
+**What it is for.** A blob id on Walrus is computed from the blob's own bytes, so nothing predicts
+one from an account code. What *is* choosable is the identifier each patch carries inside a quilt.
+Deriving that identifier from `dataKey` is what lets a tool holding only an account code compute
+the exact name to ask a public aggregator for — the last piece of "recover with the account code
+and nothing else". The address that owns the quilt comes from the same code by §1.3.
+
+**Why derived rather than a fixed word.** A constant such as `nmts-recovery-list` would recover
+identically and would also let anyone reading public storage pick NMTS accounts out of the crowd:
+patch identifiers travel in the clear in a quilt's index. Derived, the name is unguessable to
+everyone who does not already hold the key that opens what it points at.
+
+**Why it is rendered as a v4 UUID.** Every other patch in the same quilt is identified by a random
+UUID (the upload path's per-item client id). A differently shaped string beside them would mark
+which patch is worth attention and undo the previous paragraph, so the fingerprint is rendered in
+that same shape, version and variant bits included. The cost is six of the 128 bits; impersonating
+a *specific* account's name still means finding a preimage of a 122-bit value.
+
+⛔ **This did not move NCF-3 to a fourth version, and the judgement is recorded rather than
+implied.** The frozen surface is the §1 derivation chain and the §5 share identity: no existing
+key, envelope or address changes value, no reader of existing data behaves differently, and the
+version byte means what it meant before. What was added is a new name for a new object — the case
+§2 exists to arbitrate. A change that altered any derivation in §1 would still require NCF-4.
+
+**Limit.** The name hides *which patch is the manifest*. It does not hide that the account exists:
+the blob object holding the quilt is owned by the wallet that paid for it, and that wallet comes
+from the same account code, so anyone who already knows an account's wallet address can see how
+many quilts it holds and when.
 
 ---
 
@@ -805,7 +844,7 @@ ordinary — another device writing twice while this one was closed is byte-for-
 situation. So what the parent link buys is precisely this: **a drive in active use cannot be forked
 or rolled back without the next consecutive read seeing it**, and a device that skipped versions
 records that continuity was *not* proved (`chainState().continuityChecked`) rather than implying it
-was. Closing the gap needs an anchor the server does not control — the recovery map, or the chain —
+was. Closing the gap needs an anchor the server does not control — the recovery list, or the chain —
 and is recorded in our backlog rather than quietly left out.
 
 ### 6.2 Renamed key and AAD
@@ -906,7 +945,7 @@ Written here because a specification that lists only its defences is a marketing
 * **A file-list rollback across a gap in versions** (§6.1). The parent link is checked on
   consecutive reads; a server that skips a version number is never checked, and a device with no
   history at all has nothing to compare on first contact. Closing either needs an anchor the server
-  does not control (the recovery map, or the chain) and is recorded in our backlog rather than
+  does not control (the recovery list, or the chain) and is recorded in our backlog rather than
   quietly left out.
 * **Availability.** A server that refuses to return a public key, or returns "no such address",
   blocks a share. NCF-3 closes lying, not refusing.
