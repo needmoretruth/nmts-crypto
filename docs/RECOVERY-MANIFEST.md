@@ -217,13 +217,23 @@ person every other file in it.
 - **Expiry invariant:** a mirrored manifest's Walrus expiry MUST be ≥ the longest-lived file it describes;
   if it rides inside a cohort quilt whose expiry undershoots that, an additional dedicated mirror is
   required (lifecycle-engine rule, P4).
-- **Deliberately deferred.** As of 2026-07-26 only the device-kept manifest of §5 exists. The
-  mirror ships **with the standalone recovery tool, after launch** — that tool is the only way to verify
-  what a mirror promises ("recoverable even if you lose the file"), so shipping the mirror first would sell
-  an unverifiable claim while charging two wallet signatures per refresh for it. Nothing above is
-  invalidated by the wait: `accounts.recovery_manifest_kind = 2` and the `"walrus"` branch of
-  `PUT /v1/account/recovery-map` are already built and tested, and the remaining work is writing the sealed
-  bytes as one dedicated blob.
+- **The reason for the wait is spent.** It was deferred because the mirror's promise ("recoverable even
+  if you lose the file") could only be verified by a standalone recovery tool, and there was none — so
+  shipping the mirror first would have sold an unverifiable claim while charging two wallet signatures per
+  refresh for it. ⚠ **The tool was built on 2026-08-17 and is not published**: it went out without the
+  owner's approval and was withdrawn the same hour. It is being rebuilt to the owner's design and will
+  live at `github.com/needmoretruth/nmts-recovery`. The mirror opens when the tool actually ships. Nothing above was invalidated by the wait: `accounts.recovery_manifest_kind = 2`
+  and the `"walrus"` branch of `PUT /v1/account/recovery-map` are already built and tested.
+- ⭐ **The mirror buys more than "you can lose the file", and this is the part to design around.** Blob
+  objects are transferred to the uploading wallet's own address, and that address derives from the account
+  code (§1.3 of the format document). So a mirrored map sitting at that same address is reachable from the
+  account code ALONE: derive the address, ask any full node what it owns, and recognise the map by
+  recomputing the envelope's key commitment. ⛔ An earlier note here proposed a SEPARATE recovery-only
+  address for privacy; that argument is void, because the account's blob objects are already at the payment
+  address and the two histories are linked with or without the map.
+- ⚠ **A map folded into a cohort flush lags by one cohort** — it cannot name the blob ids of the very
+  upload it rides along with. Either accept the lag, or let the map omit blob ids and have the reader find
+  them on chain. That choice is the first fork in the work.
 
 ## 5. The device-kept manifest file (`.nmtsmap`)
 

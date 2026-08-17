@@ -6,6 +6,13 @@ the wallet that pays for storage. It touches no network and no disk.
 
 Published so the format can be checked rather than believed.
 
+**NMTS** ([nmts.me](https://nmts.me)) is end-to-end encrypted file storage built on Walrus: every
+file is encrypted in your browser before it is uploaded, and every key comes from an account code
+that never leaves your device. This repository is part of what runs there.
+
+The program that gets your files back if NMTS is gone is a separate repository:
+[nmts-recovery](https://github.com/needmoretruth/nmts-recovery). It calls this engine.
+
 ## What is here
 
 * `crypto/` — the engine.
