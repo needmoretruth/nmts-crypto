@@ -890,11 +890,14 @@ Written here because a specification that lists only its defences is a marketing
   control) recorded in our backlog, not quietly left out.
 * **A timing side channel in the signature crate's keygen sampler.** The released `ml-dsa` 0.1.1
   still branches on secret-derived values in `coeff_from_half_byte` (the branch-free fix was merged
-  upstream on 2026-06-24 but is in no released version as of 2026-08-02, measured against the
-  crates.io index). Our structure re-derives the same key from the same seed at every login, which
-  is the repeat-measurement shape timing attacks want — but the code runs inside the user's own
-  browser, where an observer with a timer that precise is already in the page. Accepted, recorded,
-  and the upgrade is in our backlog for the day the fix ships.
+  upstream on 2026-06-24 but is in no released version — measured against the crates.io index,
+  last on 2026-08-17). Our structure re-derives the same key from the same seed at every login,
+  which is the repeat-measurement shape timing attacks want — but the code runs inside the user's
+  own browser, where an observer with a timer that precise is already in the page. Accepted and
+  recorded. ⭐ **This sentence cannot quietly rot**: since 2026-08-17 our deploy reads the crates.io
+  index for this crate on every release and refuses to ship the day a released version appears,
+  pointing at this paragraph. Until then it was a `curl` command in a backlog entry, which is to
+  say nobody ran it.
 * **Deletion, replay, and the sender's own view of a share** (§5.3). The row binding authenticates
   the contents of a share that is shown. A server can still withhold a share, serve an older one it
   kept, or show the *sender* a "shared with" list that is fiction. It authenticates a row, not the
