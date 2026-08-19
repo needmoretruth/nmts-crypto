@@ -153,8 +153,9 @@
     },
     {
       "dek_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-      "description": "last byte removed (tag truncated)",
+      "description": "last byte removed — the stream ends mid-chunk",
       "expect": "fail",
+      "note": "Refused on the byte count, not the tag: the decoder runs out of input before it has a tag to check. A conforming reader may report either, but it must not accept.",
       "stream_hex": "4e4346330316000000000000010000006400000000000000202122232425262728292a2b2c2d2e2f4356d36e549b24ed4d9b8d800f79af4ac5204988dc1d6ab4eaf02e581b5dbe664630d0687483ad6a99f79b78aa8af768277fb1d3b60fa8fb4cea6f4fc61a86e8fc2d83235b911e4aad5f2c378eb53c107ac83b0147c950e060a41b5556829640fb8a78b96d55ca80e78a56ad8dea7473c63d4bdac885e9e25c6969420f5ffba14e594166e4b2b327db98957cc148335a4f8953",
       "type": "truncated_final_chunk"
     },
@@ -177,14 +178,15 @@
       "description": "part 1's header placed in front of part 0's body",
       "expect": "fail",
       "note": "The whole header is AAD for every chunk, so a part served in the wrong position no longer authenticates. Compare framing_parts/three_part_file, where each part opens in its own position.",
-      "stream_hex": "4e4346330316000001000000030000000b00000000000000505152535455565758595a5b5c5d5e5fcb8413458a0b828573ca24ed37c88d7c105433775e037cbaf74f2f83c4ef5103381cd22ea2e787338c8f46c3b3a615cb9115e70005e40fbf6dba",
+      "stream_hex": "4e4346330316000001000000030000000a00000000000000505152535455565758595a5b5c5d5e5f13d5f2b40eff79e0e37b54d1cefa63e8a1d4a283633effa1fca560a3624d7e25381cd22ea2e787338c8f46c3b3a615cb9115e70005e40fbf6dba",
       "type": "swapped_part_index"
     },
     {
       "dek_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
       "description": "header plaintext_len changed 100 -> 99 (breaks AAD)",
       "expect": "fail",
-      "stream_hex": "4e4346330316000063000000000000006400000000000000202122232425262728292a2b2c2d2e2f4356d36e549b24ed4d9b8d800f79af4ac5204988dc1d6ab4eaf02e581b5dbe664630d0687483ad6a99f79b78aa8af768277fb1d3b60fa8fb4cea6f4fc61a86e8fc2d83235b911e4aad5f2c378eb53c107ac83b0147c950e060a41b5556829640fb8a78b96d55ca80e78a56ad8dea7473c63d4bdac885e9e25c6969420f5ffba14e594166e4b2b327db98957cc148335a4f89530d",
+      "note": "The whole 72-byte header is AAD for every chunk, so editing plaintext_len breaks the first chunk's tag. Its offset is 16..24; bytes 8..16 are part_index || part_total, and writing there is a DIFFERENT vector.",
+      "stream_hex": "4e4346330316000000000000010000006300000000000000202122232425262728292a2b2c2d2e2f4356d36e549b24ed4d9b8d800f79af4ac5204988dc1d6ab4eaf02e581b5dbe664630d0687483ad6a99f79b78aa8af768277fb1d3b60fa8fb4cea6f4fc61a86e8fc2d83235b911e4aad5f2c378eb53c107ac83b0147c950e060a41b5556829640fb8a78b96d55ca80e78a56ad8dea7473c63d4bdac885e9e25c6969420f5ffba14e594166e4b2b327db98957cc148335a4f89530d",
       "type": "plaintext_len_mismatch"
     }
   ],

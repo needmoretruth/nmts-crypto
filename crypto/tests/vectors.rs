@@ -13,7 +13,8 @@
 
 use nmts_crypto::codes::{AccountCode, VoucherCode};
 use nmts_crypto::framing::{
-    forge_stream_with_final_flag, verify_part_set, Header, StreamDecryptor, StreamEncryptor,
+    forge_stream_with_final_flag, verify_part_set, FramingError, Header, StreamDecryptor,
+    StreamEncryptor,
     DEFAULT_CHUNK_SIZE_LOG2, HEADER_LEN, TAG_LEN,
 };
 use nmts_crypto::{b64, kdf, manifest, share, wrap};
@@ -1165,7 +1166,8 @@ fn gen_negative_vectors() -> Vec<Value> {
         s.pop();
         out.push(json!({
             "type": "truncated_final_chunk",
-            "description": "last byte removed (tag truncated)",
+            "description": "last byte removed — the stream ends mid-chunk",
+            "note": "Refused on the byte count, not the tag: the decoder runs out of input before it has a tag to check. A conforming reader may report either, but it must not accept.",
             "dek_hex": hex::encode(dek),
             "stream_hex": hex::encode(&s),
             "expect": "fail",
@@ -1206,10 +1208,16 @@ fn gen_negative_vectors() -> Vec<Value> {
     // swapped_part_index: part 1's header in front of part 0's body (§7.3). Both are genuine
     // parts of one genuine file under one genuine DEK — only the position is a lie, and before
     // NCF-3 that lie authenticated cleanly because nothing in the header named the part.
+    //
+    // ⛔ THE TWO BODIES MUST BE THE SAME LENGTH. They were not, once: "first part" is ten bytes
+    //    and "second part" is eleven, so the forged stream declared eleven and carried ten. A
+    //    reader could refuse it on the byte count and never reach the AAD — and the vector, whose
+    //    whole purpose is to prove the AAD binds the part index, would have passed without that
+    //    binding existing at all. Equal lengths leave the position as the ONLY lie.
     {
         let total = 3u32;
         let p0 = encrypt_part(&dek, 0, total, b"first part");
-        let p1 = encrypt_part(&dek, 1, total, b"second part");
+        let p1 = encrypt_part(&dek, 1, total, b"secnd part");
         let mut forged = p1[..HEADER_LEN].to_vec();
         forged.extend_from_slice(&p0[HEADER_LEN..]);
         out.push(json!({
@@ -1227,11 +1235,17 @@ fn gen_negative_vectors() -> Vec<Value> {
     // plaintext_len_mismatch: corrupt the header's plaintext_len field.
     {
         let mut s = encrypt_fixed(&dek, np, DEFAULT_CHUNK_SIZE_LOG2, &pattern(100));
-        // header bytes 8..16 hold plaintext_len (u64 LE); change 100 -> 99.
-        s[8..16].copy_from_slice(&99u64.to_le_bytes());
+        // ⛔ NCF-3 header: plaintext_len is at 16..24. Bytes 8..16 are part_index || part_total,
+        //    and this line used to write there — an NCF-1 offset left behind by the reframing.
+        //    The vector still failed, so nothing noticed: it was rejected as an impossible part
+        //    placement (`part_total == 0`) rather than for the reason its own name gives.
+        s[16..24].copy_from_slice(&99u64.to_le_bytes());
         out.push(json!({
             "type": "plaintext_len_mismatch",
             "description": "header plaintext_len changed 100 -> 99 (breaks AAD)",
+            "note": "The whole 72-byte header is AAD for every chunk, so editing plaintext_len \
+                     breaks the first chunk's tag. Its offset is 16..24; bytes 8..16 are \
+                     part_index || part_total, and writing there is a DIFFERENT vector.",
             "dek_hex": hex::encode(dek),
             "stream_hex": hex::encode(&s),
             "expect": "fail",
@@ -1482,19 +1496,68 @@ fn verify_framing() {
     }
 }
 
+/// The error each negative vector must produce — ⛔ **not merely "some error".**
+///
+/// WHY THIS TABLE EXISTS (2026-08-19). `verify_negative` used to assert `is_err()` and nothing
+/// else, and two vectors were quietly failing for reasons other than the ones their names give:
+///
+///   * `plaintext_len_mismatch` wrote at header bytes 8..16, which in NCF-3 are
+///     `part_index || part_total`, not `plaintext_len` (16..24). It was rejected as an impossible
+///     part placement — `part_total == 0` — so nothing about `plaintext_len` was ever exercised.
+///   * `swapped_part_index` forged part 1's header onto part 0's body, but the two bodies were ten
+///     and eleven bytes, so a reader could refuse it on the byte count and never reach the AAD.
+///     The vector exists to prove the AAD BINDS THE PART INDEX; it would have passed with no such
+///     binding in the format at all.
+///
+/// ⛔ A negative vector that fails for the wrong reason is worse than a missing one: it reports a
+/// guarantee as tested. Naming the error is what makes the vector mean what it says.
+fn expected_error(kind: &str) -> FramingError {
+    match kind {
+        // The tag no longer matches the ciphertext.
+        "flipped_tag" => FramingError::Auth,
+        // ⭐ NOT `Auth`. The stream is one byte short of a complete chunk, so the decoder runs out
+        //    of input before it ever has a tag to check — the truncation is caught by the byte
+        //    count, which is EARLIER and cheaper than the AEAD. Writing `Auth` here (the first
+        //    guess) turned this assertion red on its very first run, which is how the difference
+        //    got noticed at all. Both are refusals; naming the real one keeps the vector honest
+        //    about which mechanism does the work.
+        "truncated_final_chunk" => FramingError::Incomplete,
+        // Chunk index is in the AAD, so a chunk read in another chunk's place cannot authenticate.
+        "reordered_chunks" => FramingError::Auth,
+        // `is_final` is in the AAD too.
+        "wrong_is_final" => FramingError::Auth,
+        // ⭐ THE ONE THIS TABLE WAS WRITTEN FOR: the part index is in the AAD, and with both
+        //    bodies the same length that is the ONLY thing left to reject on.
+        "swapped_part_index" => FramingError::Auth,
+        // The whole header is AAD, so editing `plaintext_len` breaks the first chunk's tag.
+        "plaintext_len_mismatch" => FramingError::Auth,
+        other => panic!(
+            "negative vector {other} has no expected error — add it to expected_error() and say \
+             WHY that is the error, or the vector goes back to proving nothing in particular"
+        ),
+    }
+}
+
 #[test]
 fn verify_negative() {
     let doc = load();
+    let mut seen = 0usize;
     for v in doc["framing_negative"].as_array().unwrap() {
         let dek = as32(v, "dek_hex");
         let stream = hexd(v, "stream_hex");
+        let kind = v["type"].as_str().unwrap();
         let result = StreamDecryptor::decrypt_all(&dek, &stream);
-        assert!(
-            result.is_err(),
-            "negative vector {} must fail but decrypted",
-            v["type"]
+        let err = result.expect_err(&format!("negative vector {kind} must fail but decrypted"));
+        assert_eq!(
+            err,
+            expected_error(kind),
+            "negative vector {kind} failed, but for the wrong reason — it is named after a \
+             guarantee it is not exercising"
         );
+        seen += 1;
     }
+    // ⛔ A filter that matches nothing also prints "ok". Count what actually ran.
+    assert!(seen >= 6, "only {seen} negative vectors ran — the set shrank or the parse broke");
 }
 
 /// §7.3 — a multi-part set that verifies, part by part and as a set.
