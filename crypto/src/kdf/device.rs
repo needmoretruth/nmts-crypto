@@ -13,7 +13,7 @@
 //! one record on exactly one device. Keeping it beside the account chain was how the fixed-salt
 //! rule nearly got applied to a human-chosen passphrase.
 
-use argon2::{Algorithm, Argon2, Params, Version};
+use argon2::Params;
 use hkdf::Hkdf;
 use sha2::Sha256;
 use zeroize::Zeroizing;
@@ -73,11 +73,10 @@ pub fn derive_device_wrap_key(
         Some(MASTER_LEN),
     )
     .map_err(|e| KdfError::Argon2(e.to_string()))?;
-    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut prk = Zeroizing::new([0u8; MASTER_LEN]);
-    argon
-        .hash_password_into(passphrase, salt, &mut *prk)
-        .map_err(|e| KdfError::Argon2(e.to_string()))?;
+    // Through the wiping wrapper, like every other Argon2id call here — see its comment for what
+    // the convenience entry point leaves behind.
+    super::argon2id_into(params, passphrase, salt, &mut *prk)?;
 
     let hk = Hkdf::<Sha256>::new(Some(b""), &*prk);
     let mut key = Zeroizing::new([0u8; DEVICE_WRAP_KEY_LEN]);

@@ -64,7 +64,7 @@ pub use device::{
     PASSPHRASE_SALT_LEN,
 };
 
-use argon2::{Algorithm, Argon2, Params, Version};
+use argon2::{Algorithm, Argon2, Block, Params, Version};
 use hkdf::Hkdf;
 use sha2::Sha256;
 use zeroize::Zeroizing;
@@ -290,6 +290,32 @@ pub fn derive(code: &AccountCode) -> Result<DerivedKeys, KdfError> {
     derive_from_bytes(code.as_bytes())
 }
 
+/// Run Argon2id into `out`, **wiping the working memory before it is freed**.
+///
+/// # ⛔ Why the convenience entry point is not used
+/// `Argon2::hash_password_into` allocates the ~64 MiB block array itself and drops it without
+/// clearing it. That array is not scratch noise: the last block of a lane is XORed and hashed to
+/// produce the output, so whatever reads that memory afterwards recomputes `master` — the root of
+/// **every** key an account has, and the one secret with no reset (`codes.rs`). The library's
+/// `zeroize` feature (on, see Cargo.toml) clears the library's OWN intermediates; the array is the
+/// caller's, which makes wiping it the caller's job. `hash_password_into_with_memory` is the entry
+/// point that lets a caller own it.
+///
+/// # Where it matters most
+/// In the browser build. Freed WASM memory stays inside one linear `ArrayBuffer` for the life of
+/// the page — nothing hands it back to an operating system — so "freed" there means "still there,
+/// and reachable by anything that gets a view on it".
+///
+/// ⚠ This does not make key material un-leakable. A live process can still be read while the
+/// values are IN USE; what it removes is the window that lasts from a login until the page closes.
+fn argon2id_into(params: Params, pwd: &[u8], salt: &[u8], out: &mut [u8]) -> Result<(), KdfError> {
+    let mut memory = Zeroizing::new(vec![Block::default(); params.block_count()]);
+    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    argon
+        .hash_password_into_with_memory(pwd, salt, out, &mut memory)
+        .map_err(|e| KdfError::Argon2(e.to_string()))
+}
+
 /// Derives the account keys directly from the 20 raw code bytes (the chain operates on the
 /// decoded bytes, never the ASCII text).
 pub fn derive_from_bytes(code_bytes: &[u8; ACCOUNT_CODE_BYTES]) -> Result<DerivedKeys, KdfError> {
@@ -301,11 +327,8 @@ pub fn derive_from_bytes(code_bytes: &[u8; ACCOUNT_CODE_BYTES]) -> Result<Derive
         Some(MASTER_LEN),
     )
     .map_err(|e| KdfError::Argon2(e.to_string()))?;
-    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut master = Zeroizing::new([0u8; MASTER_LEN]);
-    argon
-        .hash_password_into(code_bytes, ARGON2_SALT, &mut *master)
-        .map_err(|e| KdfError::Argon2(e.to_string()))?;
+    argon2id_into(params, code_bytes, ARGON2_SALT, &mut *master)?;
 
     // 2) HKDF-Extract once (empty salt), then one Expand per label. The ONLY thing keeping these
     //    outputs apart is a distinct `info` per output — a copy-pasted label would silently
@@ -474,5 +497,70 @@ mod tests {
         assert_eq!(ARGON2_T_COST, 3);
         assert_eq!(ARGON2_P_COST, 1);
         assert_eq!(ARGON2_SALT, b"NMTS-KDF-v3-salt");
+    }
+
+    /// ⛔ THE TRIPWIRE FOR THE WIPE. Two things, and the second is why the test is shaped this way.
+    ///
+    /// 1. **There really is something to wipe.** After a hash the working memory is full of
+    ///    non-zero material — the last block of a lane is what the output is made from, so this is
+    ///    not scratch noise but `master` one hash away. If this assertion ever failed, the wiping
+    ///    wrapper would be pointless and should be deleted rather than kept as decoration.
+    /// 2. **`Block: Zeroize` has to exist**, which it only does while `argon2`'s `zeroize` feature
+    ///    is on in Cargo.toml. Drop the feature and this test stops COMPILING — the loudest a
+    ///    missing feature can be, and louder than any runtime assertion could manage, because
+    ///    nothing observable changes at runtime when memory is quietly left behind.
+    ///
+    /// ⚠ What this does NOT test: that `Zeroizing`'s own drop runs. Observing memory after it is
+    /// freed cannot be done without `unsafe`, which this repository forbids. What is tested is
+    /// every link we own; the last one is the `zeroize` crate's, under its own tests.
+    #[test]
+    fn the_argon2_working_memory_holds_key_material_and_can_be_wiped() {
+        use zeroize::Zeroize;
+
+        let params = Params::new(ARGON2_M_COST, ARGON2_T_COST, ARGON2_P_COST, Some(MASTER_LEN))
+            .expect("params");
+        let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params.clone());
+        let mut memory = vec![Block::default(); params.block_count()];
+        let mut out = [0u8; MASTER_LEN];
+        argon
+            .hash_password_into_with_memory(&[7u8; ACCOUNT_CODE_BYTES], ARGON2_SALT, &mut out, &mut memory)
+            .expect("argon2id");
+
+        let live: usize = memory
+            .iter()
+            .filter(|b| b.as_ref().iter().any(|&word| word != 0))
+            .count();
+        assert!(
+            live > memory.len() / 2,
+            "the working memory came back mostly empty ({live} of {} blocks) — if Argon2id stopped \
+             leaving material behind, the wiping wrapper is dead weight and should go",
+            memory.len()
+        );
+
+        memory.zeroize();
+        assert!(
+            memory.iter().all(|b| b.as_ref().iter().all(|&word| word == 0)),
+            "the working memory survived a wipe",
+        );
+    }
+
+    /// The wrapper must not change a single derived byte — it changes WHERE the blocks live, and
+    /// nothing else. A wrong block count would be caught by the conformance vectors eventually;
+    /// this catches it here, next to the code that could cause it.
+    #[test]
+    fn wiping_the_working_memory_does_not_change_what_is_derived() {
+        let params = Params::new(ARGON2_M_COST, ARGON2_T_COST, ARGON2_P_COST, Some(MASTER_LEN))
+            .expect("params");
+        let code = [0x5au8; ACCOUNT_CODE_BYTES];
+
+        let mut ours = [0u8; MASTER_LEN];
+        argon2id_into(params.clone(), &code, ARGON2_SALT, &mut ours).expect("wrapped");
+
+        let mut theirs = [0u8; MASTER_LEN];
+        Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+            .hash_password_into(&code, ARGON2_SALT, &mut theirs)
+            .expect("plain");
+
+        assert_eq!(ours, theirs);
     }
 }

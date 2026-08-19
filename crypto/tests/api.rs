@@ -5,7 +5,9 @@
 
 use nmts_crypto::codes::{self, AccountCode, CodeError, VoucherCode};
 use nmts_crypto::framing::{FramingError, StreamDecryptor, StreamEncryptor};
-use nmts_crypto::manifest::{self, Item, ManifestError, Part, Quilt, RecoveryManifest};
+use nmts_crypto::manifest::{
+    self, Item, ManifestError, Meta, MetaStorage, MetaTotals, Part, Quilt, RecoveryManifest,
+};
 use nmts_crypto::{b64, kdf, share, wrap};
 
 // ----- codes -------------------------------------------------------------------------
@@ -315,6 +317,11 @@ fn sample_manifest() -> RecoveryManifest {
         prev_manifest_blob_id: Some("prevManifestBlob".into()),
         generated_at: "2026-07-26T00:00:00Z".into(),
         account_id: "abcdEFGH1234-_wx".into(),
+        // ⛔ Absent ON PURPOSE, and it must stay absent: this fixture is the NRM-2 document, and
+        // a self-description block (owner directive, 2026-08-19) is additive — its absence has to keep parsing and
+        // keep round-tripping, or the lists already on people's disks stop being readable.
+        // `manifest_meta_round_trips` covers the present case.
+        meta: None,
         items: vec![
             Item {
                 id: "11111111-1111-4111-8111-111111111111".into(),
@@ -323,6 +330,8 @@ fn sample_manifest() -> RecoveryManifest {
                 size: 1_073_741_825,
                 dek: b64::encode(&[9u8; 32]),
                 kind: "file".into(),
+                created_at: None,
+                updated_at: None,
                 content_hash: Some(b64::encode(&[1u8; 32])),
                 parts: vec![
                     Part {
@@ -331,6 +340,7 @@ fn sample_manifest() -> RecoveryManifest {
                         part_index: Some(0),
                         blob_id: Some("blobA".into()),
                         plaintext_len: 1_073_741_824,
+                        padded_len: None,
                         sui_object_id: Some("0xabc".into()),
                         // Named outright — what every map written from now on looks like.
                         network: Some("walrus".into()),
@@ -339,6 +349,7 @@ fn sample_manifest() -> RecoveryManifest {
                         part_index: Some(1),
                         blob_id: Some("blobB".into()),
                         plaintext_len: 1,
+                        padded_len: None,
                         sui_object_id: None,
                         // Omitted — what every map written BEFORE the field looks like.
                         network: None,
@@ -353,11 +364,14 @@ fn sample_manifest() -> RecoveryManifest {
                 size: 12,
                 dek: b64::encode(&[7u8; 32]),
                 kind: "file".into(),
+                created_at: None,
+                updated_at: None,
                 content_hash: None,
                 parts: vec![Part {
                     part_index: Some(0),
                     blob_id: Some("blobC".into()),
                     plaintext_len: 12,
+                    padded_len: None,
                     sui_object_id: None,
                     // A non-default name, so neither implementation can pass by hardcoding
                     // "walrus". Nothing is stored on Filecoin — this exercises the format.
@@ -466,14 +480,15 @@ fn manifest_still_parses_an_nrm1_document() {
 
 /// The version marker moved to 2 when `part_index` became required.
 #[test]
-fn manifest_version_is_three() {
+fn manifest_version_is_four() {
     // Pinned as a LITERAL, because every other test here compares against the constant and so
     // proves the number travels rather than what it is — and what it is carries the whole
     // compatibility story (RECOVERY-MANIFEST.md §6). Moving it means moving that section too.
-    assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION, 3);
+    assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION, 4);
     // The thresholds are separate facts from "the newest we can write", and each stays put.
     assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION_WITH_PART_INDEX, 2);
     assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION_WITH_OWN_QUILT, 3);
+    assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION_WITH_PADDING, 4);
 }
 
 /// ⛔ A document only claims v3 when it USES v3, and this is the compatibility promise in one
@@ -489,6 +504,7 @@ fn a_document_claims_the_version_its_contents_need_and_no_more() {
         part_index: Some(0),
         blob_id: None,
         plaintext_len: 12,
+        padded_len: None,
         sui_object_id: None,
         network: Some("walrus".into()),
     }];
@@ -498,6 +514,89 @@ fn a_document_claims_the_version_its_contents_need_and_no_more() {
         identifier: Some("55555555-5555-4555-8555-555555555555".into()),
     });
     assert_eq!(manifest::minimum_version(&own.items), 3);
+
+    // ⛔ And padding takes it to 4 — which is the point of the number, not a formality. A list
+    // holding a padded part must not open in a build that would read `plaintext_len` as the whole
+    // stream: that build would stop on the sealed header, which is fine, but it should stop on the
+    // VERSION and say so before an account code is ever asked for.
+    let mut padded = sample_manifest();
+    padded.items[0].parts[1].padded_len = Some(4_194_304);
+    assert_eq!(manifest::minimum_version(&padded.items), 4);
+}
+
+/// The NRM-4 fixture parses, and the two numbers a padded part carries stay apart.
+///
+/// ⛔ What would make this test pass while the format was broken: reading `padded_len` as the
+///    part's contribution. So it asserts the SUM — the parts still add up to `size` — which is
+///    the invariant padding must not cost, and the one that catches an edited `size`.
+#[test]
+fn manifest_reads_the_padded_nrm4_fixture() {
+    let raw = include_bytes!("vectors/nrm4-sample.json");
+    let parsed = RecoveryManifest::from_json(raw).expect("the NRM-4 fixture must parse");
+    assert_eq!(parsed.v, 4);
+
+    let small = &parsed.items[0];
+    assert_eq!(small.size, 12);
+    assert_eq!(small.parts[0].plaintext_len, 12);
+    assert_eq!(small.parts[0].padded_len, Some(1_048_576));
+    assert_eq!(small.parts[0].stream_plaintext_len(), 1_048_576);
+    assert!(small.parts_add_up(), "padding must not disturb the size arithmetic");
+
+    let big = &parsed.items[1];
+    // The full part is untouched and answers the same for both numbers; only the tail is padded.
+    assert_eq!(big.parts[0].padded_len, None);
+    assert_eq!(big.parts[0].stream_plaintext_len(), 1_073_741_824);
+    assert_eq!(big.parts[1].padded_len, Some(4_194_304));
+    assert!(big.parts_add_up());
+
+    let emitted = parsed.to_json().unwrap();
+    assert_eq!(fixture_json(&emitted), fixture_json(raw));
+}
+
+/// ⛔ Every padded document a reader would have to guess about is refused, on BOTH paths.
+///
+/// The write path matters as much as the read path here: this crate is what the browser compiles
+/// to WASM, so a refusal on `to_json` is what stops a contradictory list being sealed and handed
+/// to somebody as their only copy.
+#[test]
+fn manifest_refuses_padding_that_contradicts_itself() {
+    let doc = |v: u32, part: &str| {
+        format!(
+            r#"{{"v":{v},"seq":1,"prev_manifest_blob_id":null,
+            "generated_at":"2026-08-18T00:00:00Z","account_id":"x","items":[
+            {{"id":"i","name":"n","path":"/","size":4,"dek":"d","kind":"file",
+              "parts":[{part}]}}]}}"#
+        )
+        .into_bytes()
+    };
+    let padded = r#"{"part_index":0,"blob_id":"a","plaintext_len":4,"padded_len":64}"#;
+
+    // 1. The form needs its version. A v3 document using it was altered, not written early.
+    assert!(matches!(
+        RecoveryManifest::from_json(&doc(3, padded)),
+        Err(manifest::ManifestError::PaddingTooOld { .. })
+    ));
+
+    // 2. Equal is not padding — it is written as absence, so that two identical lists cannot
+    //    differ in their canonical bytes.
+    assert!(matches!(
+        RecoveryManifest::from_json(&doc(4, r#"{"part_index":0,"blob_id":"a","plaintext_len":4,"padded_len":4}"#)),
+        Err(manifest::ManifestError::PaddingNotLarger { .. })
+    ));
+
+    // 3. Smaller is a stream that could not have held the part at all.
+    assert!(matches!(
+        RecoveryManifest::from_json(&doc(4, r#"{"part_index":0,"blob_id":"a","plaintext_len":4,"padded_len":3}"#)),
+        Err(manifest::ManifestError::PaddingNotLarger { .. })
+    ));
+
+    // 4. The same three refusals on the way OUT, from structs rather than from JSON.
+    let mut m = RecoveryManifest::from_json(&doc(4, padded)).expect("the honest form must parse");
+    m.v = 3;
+    assert!(matches!(m.to_json(), Err(manifest::ManifestError::PaddingTooOld { .. })));
+    m.v = 4;
+    m.items[0].parts[0].padded_len = Some(4);
+    assert!(matches!(m.to_json(), Err(manifest::ManifestError::PaddingNotLarger { .. })));
 }
 
 /// The NRM-3 fixture parses, and BOTH placements in it resolve to what they say they are.
@@ -531,6 +630,45 @@ fn manifest_reads_both_placements_of_the_nrm3_fixture() {
     // The own-quilt item names no blob, and that absence is the document being honest rather
     // than incomplete: the blob did not exist yet when it was written.
     assert!(parsed.items[1].parts[0].blob_id.is_none());
+
+    let emitted = parsed.to_json().unwrap();
+    assert_eq!(fixture_json(&emitted), fixture_json(raw));
+}
+
+/// The self-description fixture parses, says what it says, and comes back out byte-identical.
+///
+/// ⛔ SHARED WITH THE BROWSER (`web/test/recovery-map.test.ts`). The block was added without moving
+/// the version, so nothing about the format's own machinery would catch the two implementations
+/// drifting on it — a field the browser writes and this side silently drops would round-trip on
+/// each side alone and disagree only in a real recovery.
+#[test]
+fn manifest_reads_the_self_description_fixture() {
+    let raw = include_bytes!("vectors/nrm-meta-sample.json");
+    let parsed = RecoveryManifest::from_json(raw).expect("the self-description fixture must parse");
+    // The version the CONTENT needs, untouched by the block (the owner's compatibility rule: until a 1.0.0 exists, a format may run ahead of
+/// the tools, but never in a way that makes a published build refuse a file it could read).
+    assert_eq!(parsed.v, 2);
+
+    let meta = parsed.meta.as_ref().expect("the block");
+    assert_eq!(meta.product.as_deref(), Some("NMTS"));
+    assert_eq!(meta.tool.as_deref(), Some("nmts-recovery"));
+    assert_eq!(
+        meta.tool_url.as_deref(),
+        Some("https://github.com/needmoretruth/nmts-recovery")
+    );
+    let storage = meta.storage.as_ref().expect("where the bytes are");
+    assert_eq!(storage.network.as_deref(), Some("walrus"));
+    // The field that closes the documented hole: a blob id alone never said which chain.
+    assert_eq!(storage.chain.as_deref(), Some("mainnet"));
+    assert_eq!(storage.aggregators.len(), 1);
+    let totals = meta.totals.as_ref().expect("what it claims to hold");
+    assert_eq!(totals.items, Some(parsed.items.len() as u64));
+
+    // Dates on the first item; NONE on the second, which is what a file uploaded before the fields
+    // existed looks like. A reader that defaulted the absence would date it 1970.
+    assert_eq!(parsed.items[0].updated_at.as_deref(), Some("2026-03-04T05:06:07Z"));
+    assert_eq!(parsed.items[0].created_at.as_deref(), Some("2026-02-03T04:05:06Z"));
+    assert!(parsed.items[1].updated_at.is_none());
 
     let emitted = parsed.to_json().unwrap();
     assert_eq!(fixture_json(&emitted), fixture_json(raw));
@@ -784,6 +922,7 @@ fn manifest_omits_absent_optional_fields() {
         prev_manifest_blob_id: None,
         generated_at: "2026-07-02T00:00:00Z".into(),
         account_id: "x".into(),
+        meta: None,
         items: vec![Item {
             id: "i".into(),
             name: "n".into(),
@@ -791,11 +930,14 @@ fn manifest_omits_absent_optional_fields() {
             size: 0,
             dek: b64::encode(&[0u8; 32]),
             kind: "file".into(),
+            created_at: None,
+            updated_at: None,
             content_hash: None,
             parts: vec![Part {
                 part_index: Some(0),
                 blob_id: Some("b".into()),
                 plaintext_len: 0,
+                padded_len: None,
                 sui_object_id: None,
                 network: None,
             }],
@@ -803,7 +945,17 @@ fn manifest_omits_absent_optional_fields() {
         }],
     };
     let json = String::from_utf8(m.to_json().unwrap()).unwrap();
-    for absent in ["quilt", "content_hash", "sui_object_id", "network"] {
+    for absent in [
+        "quilt",
+        "content_hash",
+        "sui_object_id",
+        "network",
+        // Additive since the self-description was added. An absent self-description must leave NO trace — a `"meta":null`
+        // would be a second spelling of "not recorded" for every reader to have to handle.
+        "meta",
+        "created_at",
+        "updated_at",
+    ] {
         assert!(
             !json.contains(absent),
             "absent {absent} must be omitted: {json}"
@@ -812,6 +964,71 @@ fn manifest_omits_absent_optional_fields() {
     // `part_index` is not in that list and must never join it: from v2 it is required, so the
     // `Option` that makes NRM-1's absence representable must not also let a v2 writer skip it.
     assert!(json.contains("\"part_index\":0"), "{json}");
+}
+
+/// The self-description survives a round trip, and carrying it does NOT raise the version.
+///
+/// ⛔ The version half is the point (the owner's compatibility rule: until a 1.0.0 exists, a format may run ahead of
+/// the tools, but never in a way that makes a published build refuse a file it could read). Until a 1.0.0 exists the owner's rule is that a
+/// format may run ahead of the tools — but `MANIFEST_VERSION` is a CEILING for the builds already
+/// published, so a bump makes them refuse a list rather than degrade on it. An addition whose
+/// absence changes no meaning must therefore leave the number alone, and a future edit that puts
+/// something load-bearing in [`Meta`] has to break this test on the way past.
+#[test]
+fn manifest_meta_round_trips_without_moving_the_version() {
+    let mut m = sample_manifest();
+    m.meta = Some(Meta {
+        product: Some("NMTS".into()),
+        product_url: Some("https://nmts.me".into()),
+        app_version: Some("9.9.9".into()),
+        tool: Some("nmts-recovery".into()),
+        tool_url: Some("https://github.com/needmoretruth/nmts-recovery".into()),
+        spec_url: Some("https://example.invalid/RECOVERY-MANIFEST.md".into()),
+        storage: Some(MetaStorage {
+            network: Some("walrus".into()),
+            chain: Some("mainnet".into()),
+            aggregators: vec!["https://aggregator.example".into()],
+            chain_rpc: Some("https://rpc.example".into()),
+        }),
+        totals: Some(MetaTotals {
+            items: Some(2),
+            bytes: Some(1_073_741_837),
+        }),
+    });
+    m.items[0].created_at = Some("2026-01-02T03:04:05Z".into());
+    m.items[0].updated_at = Some("2026-06-07T08:09:10Z".into());
+
+    let json = m.to_json().unwrap();
+    let back = RecoveryManifest::from_json(&json).unwrap();
+    assert_eq!(back, m);
+    // The version the CONTENT needs, unchanged by the block.
+    assert_eq!(back.v, 2);
+    assert_eq!(manifest::minimum_version(&back.items), 2);
+    // The one field that closes a documented hole: which chain the blob ids came from.
+    assert_eq!(
+        back.meta.as_ref().unwrap().storage.as_ref().unwrap().chain.as_deref(),
+        Some("mainnet")
+    );
+}
+
+/// A block from a FUTURE writer — extra keys, missing keys — is read for what it has.
+///
+/// This is the tolerant half of the same rule. A reader that required a field, or that refused a
+/// key it did not know, would turn a document it can recover from into one it cannot, over
+/// information that decides nothing.
+#[test]
+fn manifest_meta_tolerates_a_newer_writer() {
+    let doc = br#"{"v":2,"seq":1,"prev_manifest_blob_id":null,"generated_at":"t","account_id":"x",
+      "meta":{"product":"NMTS","something_new":{"nested":true},
+              "storage":{"chain":"testnet","future_field":7}},
+      "items":[]}"#;
+    let m = RecoveryManifest::from_json(doc).unwrap();
+    let meta = m.meta.unwrap();
+    assert_eq!(meta.product.as_deref(), Some("NMTS"));
+    assert_eq!(meta.storage.unwrap().chain.as_deref(), Some("testnet"));
+    // Absent halves stay absent rather than becoming defaults that claim something.
+    assert!(meta.tool_url.is_none());
+    assert!(meta.totals.is_none());
 }
 
 #[test]

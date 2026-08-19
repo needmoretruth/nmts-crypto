@@ -1,0 +1,86 @@
+{
+  "_comment": [
+    "SHARED FIXTURE (self-description) — two independent implementations must agree on this document.",
+    "  Rust  : nmts/crypto/tests/api.rs            (what the standalone recovery tool parses)",
+    "  Web   : nmts/web/test/recovery-map.test.ts  (what the browser writes)",
+    "Keys beginning with _ are documentation and are ignored by both parsers.",
+    "WHAT THIS ADDS (owner directive, 2026-08-19): a document that describes ITSELF, and per-file dates.",
+    "A recovery list described the ACCOUNT thoroughly and itself barely at all. The person it is for",
+    "is holding one file years later with no site to visit: which program reads this, where is it,",
+    "where is the format written down, and WHICH CHAIN do these blob ids belong to were unanswered.",
+    "The last of those is not cosmetic — a blob id from testnet and one from mainnet are the same",
+    "kind of string, and the recovery program carried that as a documented limitation.",
+    "⛔ THE VERSION DID NOT MOVE, and must not. Every field here is additive and its ABSENCE changes",
+    "no meaning, so nmts-recovery 0.1.0 and 0.2.x read this document exactly as they read one without",
+    "it. `v` is still what the CONTENT needs — 2 for this one. A bump would have made those builds",
+    "REFUSE the file, which is the opposite of the favour it looks like — until a 1.0.0 exists a",
+    "format may run ahead of the tools, but never so that a published build refuses a file it",
+    "could read.",
+    "⚠ EVERY FIELD IS A CLAIM AND EVERY FIELD IS OPTIONAL. A reader must never require one, and must",
+    "never act on `created_at`/`updated_at` beyond stamping them on the files it writes: they come",
+    "from the storage layer and nothing checks them. `seq` orders the chain, as it always has.",
+    "The second item carries NO dates — what a file uploaded before the fields existed looks like."
+  ],
+  "v": 2,
+  "seq": 21,
+  "prev_manifest_blob_id": "prevManifestBlob",
+  "generated_at": "2026-08-19T00:00:00Z",
+  "account_id": "abcdEFGH1234-_wx",
+  "meta": {
+    "product": "NMTS",
+    "product_url": "https://nmts.me",
+    "app_version": "0.63.0",
+    "tool": "nmts-recovery",
+    "tool_url": "https://github.com/needmoretruth/nmts-recovery",
+    "spec_url": "https://github.com/needmoretruth/nmts-recovery/blob/main/docs/RECOVERY-MANIFEST.md",
+    "storage": {
+      "network": "walrus",
+      "chain": "mainnet",
+      "aggregators": [
+        "https://aggregator.walrus-mainnet.walrus.space"
+      ],
+      "chain_rpc": "https://rpc-mainnet.suiscan.xyz"
+    },
+    "totals": {
+      "items": 2,
+      "bytes": 1048588
+    }
+  },
+  "items": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "name": "photo.jpg",
+      "path": "/photos/2026",
+      "size": 1048576,
+      "dek": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+      "kind": "file",
+      "created_at": "2026-02-03T04:05:06Z",
+      "updated_at": "2026-03-04T05:06:07Z",
+      "parts": [
+        {
+          "part_index": 0,
+          "blob_id": "blobA",
+          "plaintext_len": 1048576,
+          "network": "walrus"
+        }
+      ],
+      "content_hash": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "note.txt",
+      "path": "/",
+      "size": 12,
+      "dek": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      "kind": "file",
+      "parts": [
+        {
+          "part_index": 0,
+          "blob_id": "blobB",
+          "plaintext_len": 12,
+          "network": "walrus"
+        }
+      ]
+    }
+  ]
+}

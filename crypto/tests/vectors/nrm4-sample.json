@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "SHARED FIXTURE (NRM-4) — two independent implementations must agree on this document.",
+    "  Rust  : nmts/crypto/tests/api.rs            (what the standalone recovery tool parses)",
+    "  Web   : nmts/web/test/recovery-map.test.ts  (what the browser writes)",
+    "Keys beginning with _ are documentation and are ignored by both parsers.",
+    "WHAT NRM-4 ADDS: padded_len, on a part whose stored stream was sealed LARGER than the bytes",
+    "it contributes, so that nobody who can see the stored object can read the file's real size",
+    "off it. The padding is inside the plaintext, before sealing, because an NCF-3 header is",
+    "authenticated but NOT encrypted: plaintext_len sits in the clear at offset 16 of a public",
+    "Walrus object, so padding tacked onto the stored bytes would leave the true length legible.",
+    "WHY TWO NUMBERS RATHER THAN ONE: plaintext_len keeps its old meaning — the real bytes this",
+    "part contributes — so 'the parts must sum to exactly size' keeps its exact strength. Folding",
+    "padding into it would turn that equality into 'at least', which accepts any size below the",
+    "real one and hands back a truncated file with nothing to say so.",
+    "BOTH SIDES MUST REFUSE: padded_len in a document declaring v < 4, and padded_len that is not",
+    "strictly greater than plaintext_len (equal is written as absence; smaller is impossible).",
+    "The AMOUNT of padding is deliberately unchecked — it follows a setting a person can change,",
+    "so a rule here would refuse files padded under a setting this build has not heard of.",
+    "The two items are the two shapes an upload produces: a small file sitting on the 1 MiB",
+    "floor (12 real bytes inside a 1 MiB stream), and a multi-part file whose FULL parts are",
+    "untouched and whose TAIL is padded."
+  ],
+  "v": 4,
+  "seq": 14,
+  "prev_manifest_blob_id": "prevManifestBlob",
+  "generated_at": "2026-08-18T00:00:00Z",
+  "account_id": "abcdEFGH1234-_wx",
+  "items": [
+    {
+      "id": "66666666-6666-4666-8666-666666666666",
+      "name": "small.txt",
+      "path": "/docs",
+      "size": 12,
+      "dek": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      "kind": "file",
+      "content_hash": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      "parts": [
+        {
+          "part_index": 0,
+          "blob_id": "blobSmall",
+          "plaintext_len": 12,
+          "padded_len": 1048576,
+          "network": "walrus"
+        }
+      ]
+    },
+    {
+      "id": "77777777-7777-4777-8777-777777777777",
+      "name": "big.bin",
+      "path": "/",
+      "size": 1073741825,
+      "dek": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+      "kind": "file",
+      "parts": [
+        {
+          "part_index": 0,
+          "blob_id": "blobBig0",
+          "plaintext_len": 1073741824,
+          "network": "walrus"
+        },
+        {
+          "part_index": 1,
+          "blob_id": "blobBig1",
+          "plaintext_len": 1,
+          "padded_len": 4194304,
+          "network": "walrus"
+        }
+      ]
+    }
+  ]
+}

@@ -13,7 +13,12 @@ name = "nmts_crypto"
 # AEAD: XChaCha20-Poly1305 (24-byte nonce, 16-byte tag) — NCF-1 §0.
 chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
 # Password KDF: Argon2id v1.3 — NCF-1 §2. Raw-hash path only (no PHC string handling).
-argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
+# ⭐ `zeroize` is ON. Without it Argon2id leaves behind, in freed memory, values from which
+#    `master` is recomputed with no work — and `master` is the root of EVERY key an account has
+#    (kdf/mod.rs). The feature clears the library's own intermediates; the ~64 MiB block array is
+#    the CALLER's, and `kdf::argon2id_into` is where we wipe that (see its comment for why the
+#    convenience entry point could not be used).
+argon2 = { version = "0.5", default-features = false, features = ["alloc", "zeroize"] }
 # Key expansion: HKDF-SHA-256 — NCF-1 §2.
 hkdf = "0.12"
 sha2 = "0.10"

@@ -71,13 +71,15 @@ use crate::wrap::{self, WrapError, AAD_RECOVERY_MAP};
 
 /// The newest manifest format version (`"v"` field) this crate writes and understands.
 ///
-/// Raised 1 → 2 on 2026-07-29 when `part_index` became required on every part, and 2 → 3 on
-/// 2026-08-17 when [`Quilt`] gained the own-quilt placement (`docs/RECOVERY-MANIFEST.md` §6).
+/// Raised 1 → 2 on 2026-07-29 when `part_index` became required on every part, 2 → 3 on
+/// 2026-08-17 when [`Quilt`] gained the own-quilt placement (`docs/RECOVERY-MANIFEST.md` §6),
+/// and 3 → 4 on 2026-08-18 when a part could say it was PADDED ([`Part::padded_len`]).
 /// Each number moved for a single additive form so that the form's ABSENCE means something: see
-/// [`MANIFEST_VERSION_WITH_PART_INDEX`] and [`MANIFEST_VERSION_WITH_OWN_QUILT`].
+/// [`MANIFEST_VERSION_WITH_PART_INDEX`], [`MANIFEST_VERSION_WITH_OWN_QUILT`] and
+/// [`MANIFEST_VERSION_WITH_PADDING`].
 ///
 /// ⚠ **A writer stamps [`minimum_version`], not this.** See that function for why.
-pub const MANIFEST_VERSION: u32 = 3;
+pub const MANIFEST_VERSION: u32 = 4;
 
 /// The first NRM version in which `part_index` is required on every part.
 ///
@@ -89,6 +91,13 @@ pub const MANIFEST_VERSION_WITH_PART_INDEX: u32 = 2;
 
 /// The first NRM version in which [`Quilt`] may carry the own-quilt placement.
 pub const MANIFEST_VERSION_WITH_OWN_QUILT: u32 = 3;
+
+/// The first NRM version in which a part may carry [`Part::padded_len`].
+///
+/// The marker is what makes the field's absence mean "this part was not padded" rather than
+/// "this writer did not record it". Strip the field from a v4 document and the reader stops on
+/// the sealed header instead of quietly handing back padding as file content.
+pub const MANIFEST_VERSION_WITH_PADDING: u32 = 4;
 
 /// The lowest `v` a document holding these items may honestly declare.
 ///
@@ -104,11 +113,17 @@ pub const MANIFEST_VERSION_WITH_OWN_QUILT: u32 = 3;
 /// before its own quilt existed. The file a person downloads is built from a finished upload, so
 /// every placement in it is absolute.
 pub fn minimum_version(items: &[Item]) -> u32 {
-    if items
+    let padded = items
+        .iter()
+        .flat_map(|item| item.parts.iter())
+        .any(|part| part.padded_len.is_some());
+    let own_quilt = items
         .iter()
         .filter_map(|item| item.quilt.as_ref())
-        .any(|q| q.identifier.is_some())
-    {
+        .any(|q| q.identifier.is_some());
+    if padded {
+        MANIFEST_VERSION_WITH_PADDING
+    } else if own_quilt {
         MANIFEST_VERSION_WITH_OWN_QUILT
     } else {
         MANIFEST_VERSION_WITH_PART_INDEX
@@ -269,6 +284,39 @@ pub enum ManifestError {
         /// Whether one of them also carried a `blob_id`.
         blob_id_present: bool,
     },
+    /// A document older than NRM-4 carried a part with `padded_len`.
+    ///
+    /// Same reasoning as [`Self::OwnQuiltTooOld`]: the version marker is what makes the form's
+    /// presence mean something. Reading padding out of a document that predates padding would be
+    /// believing a field the writer of that document never wrote.
+    #[error("item {item_id}: the part at position {position} records padding, which needs v{needed}, but the document says v{v}")]
+    PaddingTooOld {
+        /// The item's NMTS id.
+        item_id: String,
+        /// Position in the item's `parts` array.
+        position: usize,
+        /// The `v` the document declared.
+        v: u32,
+        /// The first version in which the form exists.
+        needed: u32,
+    },
+    /// A part's `padded_len` was not larger than its `plaintext_len`.
+    ///
+    /// The field exists to say "the sealed stream is bigger than the bytes this part
+    /// contributes". Equal is not padding and must be written as absence, so that the canonical
+    /// bytes of two identical lists cannot differ; smaller is a stream that could not hold the
+    /// part at all. Both are contradictions, and neither has a reading a parser may pick.
+    #[error("item {item_id}: the part at position {position} says it contributes {plaintext_len} bytes out of a padded {padded_len}")]
+    PaddingNotLarger {
+        /// The item's NMTS id.
+        item_id: String,
+        /// Position in the item's `parts` array.
+        position: usize,
+        /// The real bytes the part claims to contribute.
+        plaintext_len: u64,
+        /// The padded length it claims the sealed stream declares.
+        padded_len: u64,
+    },
     /// An item's parts do not add up to the item's `size` — refused on the WRITE path.
     ///
     /// RECOVERY-MANIFEST.md §2 makes this a writer MUST and a reader MAY, and this crate
@@ -323,8 +371,44 @@ pub struct Part {
     /// document really did name a blob.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub blob_id: Option<String>,
-    /// Plaintext byte length of this part.
+    /// Plaintext byte length of this part — the REAL bytes it contributes to the file.
+    ///
+    /// ⛔ This keeps its meaning when a part is padded: it is what the reader writes out, and
+    /// what [`Item::parts_add_up`] sums against `size`. What the stored stream's own header
+    /// says is [`Part::padded_len`], and the two are different numbers on purpose.
     pub plaintext_len: u64,
+    /// What the stored stream's NCF-3 header declares, when the part was PADDED and that is
+    /// larger than [`Part::plaintext_len`]. Absent means the part was not padded.
+    ///
+    /// # Why padding needs a field at all
+    /// Size padding hides how big a file is from anyone who can see the stored bytes. It cannot
+    /// be done by appending to the stored blob, because an NCF-3 header is **authenticated, not
+    /// encrypted**: `plaintext_len` sits in the clear at offset 16 of a public Walrus object, so
+    /// a reader of that blob would read the exact original length however much was tacked on
+    /// afterwards. The padding therefore goes INTO the plaintext, before sealing — which makes
+    /// the header's number the padded one, and leaves the real one with nowhere else to live.
+    ///
+    /// # Why not simply let `plaintext_len` be the padded number
+    /// Because `size` is then unguarded. The reader's strongest arithmetic is
+    /// [`Item::parts_add_up`] — the parts must sum to exactly the item's `size` — and it is what
+    /// catches a `size` somebody edited in a list they got hold of. Fold padding into
+    /// `plaintext_len` and that equality has to become "greater than or equal", which accepts
+    /// any `size` at all below the real one: the file comes back truncated and nothing says so
+    /// unless the item happens to carry a content hash. Keeping the two numbers apart means every
+    /// check that existed before padding keeps its exact strength, and padding adds one more
+    /// (`padded_len` must exceed `plaintext_len`, and the sealed header must equal `padded_len`).
+    ///
+    /// # What the reader does with it
+    /// Checks the sealed header against [`Part::stream_plaintext_len`], decrypts the whole padded
+    /// stream — every byte still authenticates — and keeps the first `plaintext_len` bytes. The
+    /// discarded tail is never written and never hashed.
+    ///
+    /// ⚠ The SIZE of the padding is not checked against any rule. It is a user-visible choice
+    /// (a coarser unit, or a number typed in), so a tool that enforced today's rule would refuse
+    /// files padded under tomorrow's setting. What is checked is that the list and the sealed
+    /// header agree, which is the part an attacker could otherwise move.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub padded_len: Option<u64>,
     /// Which storage network holds `blob_id` — a NAME (`"walrus"`), never a code.
     ///
     /// A blob ID is only meaningful on the network that issued it, so this is what tells the
@@ -353,6 +437,16 @@ pub struct Part {
 pub const NETWORK_WHEN_UNRECORDED: &str = "walrus";
 
 impl Part {
+    /// What this part's SEALED NCF-3 header must declare: the padded length when the part was
+    /// padded, and the real length otherwise.
+    ///
+    /// Readers should compare the header against this rather than against `plaintext_len`
+    /// directly, so that "was this part padded" is decided in one place instead of at every
+    /// comparison site.
+    pub fn stream_plaintext_len(&self) -> u64 {
+        self.padded_len.unwrap_or(self.plaintext_len)
+    }
+
     /// The storage network holding this part, resolving an absent field to [`NETWORK_WHEN_UNRECORDED`].
     ///
     /// The recovery tool should route every fetch through this rather than reading `network`
@@ -450,6 +544,23 @@ pub struct Item {
     pub dek: String,
     /// Item kind (e.g. `"file"`).
     pub kind: String,
+    /// When the file was created and last changed, RFC 3339 — carried so a recovery can write out
+    /// a folder whose files still have their dates (`docs/RECOVERY-MANIFEST.md` §2).
+    ///
+    /// # ⚠ These are the only values in an item that nothing checks
+    /// `name`, `size` and `dek` come out of a sealed file list; `parts` is constrained by `size`
+    /// arithmetically. These two are simply what the storage layer said when the list was built.
+    /// A reader may therefore STAMP them onto the files it writes — a wrong modification date
+    /// costs nothing and a right one is most of what makes a restored folder usable — and must not
+    /// order, compare, or decide anything with them. `seq` orders the chain, exactly as before.
+    ///
+    /// `None` on every document written before the fields existed, and on any file whose source
+    /// did not record them.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub created_at: Option<String>,
+    /// Last change, RFC 3339 — see [`Item::created_at`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub updated_at: Option<String>,
     /// SHA-256 of the whole plaintext file, base64url of 32 RAW bytes.
     ///
     /// The live drive stores this hash SEALED (`nmts/v3/content-hash`) so the server cannot
@@ -491,6 +602,92 @@ impl Item {
     }
 }
 
+/// Where the bytes a document points at actually live.
+///
+/// Every field is optional and every field is a HINT. A blob id is only meaningful on the network
+/// that issued it, and until this block existed a list said `"walrus"` and stopped there — so a
+/// list from testnet and a list from mainnet were indistinguishable and the recovery program's
+/// README carried that as a known limitation. `chain` is the half that was missing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct MetaStorage {
+    /// Storage network family, the same word a part carries (`"walrus"`).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub network: Option<String>,
+    /// Which of that network's chains issued the ids — `"mainnet"` / `"testnet"`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub chain: Option<String>,
+    /// Read endpoints the writing build was using. The FIRST thing here to go stale, so a reader
+    /// treats them as candidates beside its own defaults, never as instructions.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub aggregators: Vec<String>,
+    /// A JSON-RPC endpoint for looking up `sui_object_id`. Never needed to READ a blob.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub chain_rpc: Option<String>,
+}
+
+/// What a document claims to hold, beside what it actually holds.
+///
+/// ⛔ NOT an integrity check, and a reader must not treat a disagreement as tampering: the whole
+/// document is one authenticated envelope, so nobody can edit `items` without the account code.
+/// It is for a RE-IMPLEMENTATION — a parser written years from now against the format document,
+/// which drops records it does not recognise, has no other way to notice it read 400 of 412 files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct MetaTotals {
+    /// How many items the writer placed.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub items: Option<u64>,
+    /// The plaintext bytes those items add up to.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub bytes: Option<u64>,
+}
+
+/// What the document says about ITSELF (`docs/RECOVERY-MANIFEST.md` §2.3).
+///
+/// # Why it exists
+/// A recovery list describes an account thoroughly and used to describe itself barely at all. The
+/// person it is FOR is holding one file, years later, with no site to visit and no memory of what
+/// wrote it: which program reads this, where is that program, where is the format written down,
+/// and which chain do these addresses belong to were all unanswered. A few hundred bytes buys
+/// every one of those answers, and the document is sealed, so they cost no privacy.
+///
+/// # ⚠ Every field is a claim, and every field is optional
+/// A reader must never REQUIRE any of it. These are strings the writing build printed about
+/// itself and about other programs; a URL can die and a repository can move. They save a person a
+/// search — they never decide whether a recovery may proceed.
+///
+/// # ⛔ Its presence does not move [`MANIFEST_VERSION`]
+/// Absence changes no meaning, so the builds already published read a document carrying it exactly
+/// as they read one without it (the owner's compatibility rule: until a 1.0.0 exists, a format may run ahead of
+/// the tools, but never in a way that makes a published build refuse a file it could read). This crate sets no `deny_unknown_fields`, which is what
+/// makes that true rather than hoped for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Meta {
+    /// Product name, e.g. `"NMTS"`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub product: Option<String>,
+    /// Where the product is.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub product_url: Option<String>,
+    /// The product release that wrote this document.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub app_version: Option<String>,
+    /// The standalone program that reads it, by its published name.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tool: Option<String>,
+    /// Where to get that program.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tool_url: Option<String>,
+    /// Where this format is written down, in a copy the reader can actually reach.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub spec_url: Option<String>,
+    /// Which network and chain the addresses in this document belong to.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub storage: Option<MetaStorage>,
+    /// What the document claims to hold — see [`MetaTotals`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub totals: Option<MetaTotals>,
+}
+
 /// The recovery manifest document (RECOVERY-MANIFEST.md §2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryManifest {
@@ -518,6 +715,10 @@ pub struct RecoveryManifest {
     pub generated_at: String,
     /// The account's public `accountId`, base64url.
     pub account_id: String,
+    /// What the document says about itself — see [`Meta`]. `None` on older documents, and never
+    /// a reason to refuse one.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub meta: Option<Meta>,
     /// Every recoverable item.
     pub items: Vec<Item>,
 }
@@ -532,12 +733,14 @@ impl RecoveryManifest {
     ///   this crate can never seal a list it would then decline to open;
     /// * the declared `v` against [`minimum_version`] — a document that uses a form its own
     ///   version does not admit is one this crate would refuse on the way back in;
+    /// * padding — the same [`Self::check_padding`] both sides run;
     /// * `size` against the sum of the parts' `plaintext_len` — a writer MUST refuse an item
     ///   where those disagree. It is asymmetric on purpose: see [`Item::parts_add_up`] for why
     ///   a reader is offered the same question instead of being stopped by it.
     pub fn to_json(&self) -> Result<Vec<u8>, ManifestError> {
         self.check_part_placement()?;
         self.check_quilt_placement()?;
+        self.check_padding()?;
         for item in &self.items {
             if !item.parts_add_up() {
                 return Err(ManifestError::PartsDoNotAddUp {
@@ -556,6 +759,7 @@ impl RecoveryManifest {
         let manifest: Self = serde_json::from_slice(bytes)?;
         manifest.check_part_placement()?;
         manifest.check_quilt_placement()?;
+        manifest.check_padding()?;
         Ok(manifest)
     }
 
@@ -604,6 +808,45 @@ impl RecoveryManifest {
                         })
                     }
                     None => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The one place that decides when a part may say it was padded.
+    ///
+    /// Two rules, mirroring [`Self::check_part_placement`]'s pair:
+    ///
+    /// 1. **The form needs its version.** `padded_len` in a document declaring less than
+    ///    [`MANIFEST_VERSION_WITH_PADDING`] is an altered document, not an old one.
+    /// 2. **It must be strictly larger than `plaintext_len`.** Equal is written as absence and
+    ///    smaller is impossible; either way the document contradicts itself.
+    ///
+    /// ⛔ What is deliberately NOT checked: how much padding there is. The amount follows a
+    /// setting a person can change, so a rule here would refuse files padded under a setting this
+    /// build has not heard of. The list-versus-header agreement is what an attacker could move,
+    /// and that is checked — in the reader, against the SEALED header, not here.
+    fn check_padding(&self) -> Result<(), ManifestError> {
+        let padding_allowed = self.v >= MANIFEST_VERSION_WITH_PADDING;
+        for item in &self.items {
+            for (position, part) in item.parts.iter().enumerate() {
+                let Some(padded_len) = part.padded_len else { continue };
+                if !padding_allowed {
+                    return Err(ManifestError::PaddingTooOld {
+                        item_id: item.id.clone(),
+                        position,
+                        v: self.v,
+                        needed: MANIFEST_VERSION_WITH_PADDING,
+                    });
+                }
+                if padded_len <= part.plaintext_len {
+                    return Err(ManifestError::PaddingNotLarger {
+                        item_id: item.id.clone(),
+                        position,
+                        plaintext_len: part.plaintext_len,
+                        padded_len,
+                    });
                 }
             }
         }
