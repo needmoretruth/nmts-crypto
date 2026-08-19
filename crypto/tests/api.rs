@@ -645,8 +645,9 @@ fn manifest_reads_both_placements_of_the_nrm3_fixture() {
 fn manifest_reads_the_self_description_fixture() {
     let raw = include_bytes!("vectors/nrm-meta-sample.json");
     let parsed = RecoveryManifest::from_json(raw).expect("the self-description fixture must parse");
-    // The version the CONTENT needs, untouched by the block (the owner's compatibility rule: until a 1.0.0 exists, a format may run ahead of
-/// the tools, but never in a way that makes a published build refuse a file it could read).
+    // The version the CONTENT needs, untouched by the block. The compatibility rule: until a
+    // 1.0.0 exists a format may run ahead of the tools, but never in a way that makes a published
+    // build refuse a file it could otherwise read.
     assert_eq!(parsed.v, 2);
 
     let meta = parsed.meta.as_ref().expect("the block");
