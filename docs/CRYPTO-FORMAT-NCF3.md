@@ -259,6 +259,17 @@ the blob object holding the quilt is owned by the wallet that paid for it, and t
 from the same account code, so anyone who already knows an account's wallet address can see how
 many quilts it holds and when.
 
+⛔ **AND THE NAME IS THE ONLY THING THAT HIDES IT — the bytes do not** (recorded 2026-08-21 after
+an adversarial review pointed at it). Every other patch in the quilt is a file stream, and a file
+stream begins with the four ASCII bytes `NCF3` (§4.1). The recovery manifest is an envelope (§3.1),
+which begins with a random nonce. So a reader who fetches the quilt and looks at four bytes per
+patch picks it out without guessing a name. Two paragraphs above say a differently shaped *string*
+beside the others would "mark which patch is worth attention"; a differently shaped *prefix* does
+the same thing, and this document did not say so until now. What it costs is not the manifest's
+contents — those are sealed — but the ability to single that patch out and watch its length.
+Closing it means giving the envelope the same first four bytes or the file streams a different
+first byte, which is an NCF-4 question, not a wording one, and it is tracked for the next format version.
+
 ---
 
 ## 3. Envelope
@@ -1016,7 +1027,34 @@ That is a format change, so it could only be made before the mainnet cutover. It
 
 ### 10.4 Not yet re-attacked
 
-Between them, the two reviews have covered the specification, the Rust crate and the share path. **The
-server outside sharing and the embedded-wallet key export have not been through an adversarial
-pass.** In particular the wallet-key export path opens a new boundary and
-must be reviewed *with* this format, not after it.
+Between them, the first two reviews covered the specification, the Rust crate and the share path.
+The two gaps this section named — **the server outside sharing** and **the embedded-wallet key
+export** — were both closed on 2026-08-20.
+
+* **The key export.** The export path was checked WITH this format, as this section demanded.
+  Two defects came out of it: an embedded wallet outlived the account that made it, and the one
+  door that hands back a secret verified nothing itself. Both are fixed; the check now happens
+  where the key is, and what comes back is a single-use permission the worker mints.
+* **The server outside sharing.** Every route outside `shares.rs` / `share_links.rs` was walked.
+  The authorisation layer held: every account-scoped statement carries the account in its `WHERE`,
+  every operator route checks the key before doing work, and no path reads or moves another
+  account's rows. What it did find was elsewhere — text a stranger writes reaching an operator's
+  terminal as control characters (fixed the same day), a statutory clock a whole class of user
+  could not start, and several gates that are green because nothing can currently make them red.
+* **The browser outside the share path** — attacked 2026-08-21, the last surface this section had
+  left standing. A 26-agent adversarial sweep read the crypto worker, the wallet, the key-export
+  corridor, the sealed file list and the upload/download paths against this document. The
+  derivation chain, the envelope and the share identity held; every finding that survived
+  refutation was a LOW-severity property of a surrounding layer rather than of the format — with one
+  MEDIUM, fixed the same day: an `absent` answer from the server could make a device rebuild its
+  own sealed file list without asking, then refuse the rebuild on the next cold load and lock
+  itself out. The other five are recorded and open. The largest is that the embedded wallet will
+  sign a server-supplied string as a personal message with no format check — reachable only from a
+  route that is not mounted today. Two of the five are about this document rather than the code:
+  the length of the recovery manifest riding in a quilt is not padded while every file beside it
+  is, and the §2.5 limit above was incomplete.
+
+⚠ What is still NOT re-attacked: nothing named here. The published recovery tool is reviewed on
+its own schedule, and had its own adversarial pass on 2026-08-20. ⛔ That is a statement about
+coverage, not about safety — a surface that has been attacked once has been attacked by the
+questions somebody thought to ask that day.

@@ -1,8 +1,13 @@
 # NMTS Recovery Manifest v2 (NRM-2)
 
-> **Status: DRAFT-STABLE.** Field additions and renames are allowed only with a journalled decision
-> while NMTS is testnet-only. The format **freezes at the first mainnet mirror write (P6 gate)** — after
-> that, evolution happens as a NEXT version alongside, never by mutating this document.
+> **Status: LIVE AND STILL EVOLVING.** ⛔ The freeze this block used to announce — "the format
+> freezes at the first mainnet mirror write" — did not happen. NMTS moved to mainnet on 2026-08-02
+> and the format has moved twice since: NRM-3 (2026-08-17) and NRM-4 (2026-08-18), both recorded
+> in §6.
+> What actually governs a change is §6's own test, and it is stricter than a date: a field may be
+> added only with a journalled decision, and the version number moves only when **the absence of
+> the new form would change the meaning of something else**. A bump is a wall in front of every
+> reader already shipped, never a courtesy. Nothing is ever renamed or removed.
 > Decided 2026-07-08; the v2 bump followed on 2026-07-29. Companion section:
 > **[`CRYPTO-FORMAT-NCF3.md`](CRYPTO-FORMAT-NCF3.md) §3** (the envelope this document's §1 uses).
 >
@@ -553,8 +558,8 @@ the reader's positional obligation. **Changed:** `v` is `2`. Nothing was removed
 
 **Why it could not wait.** A list re-seals whenever it is rebuilt, but a person who builds one list and
 never rebuilds keeps that one for as long as they keep the file — which is the entire point of the
-artefact. So a field that a recovery years from now depends on has to be in the format before the
-format freezes at the mainnet cutover, not after. What forced it was an adversarial review of this
+artefact. So a field that a recovery years from now depends on had to be in the format before the
+mainnet cutover, which was then expected to freeze it. What forced it was an adversarial review of this
 path (2026-07-29): a list is built from the server's own dump, the
 builder never fetches a blob, and before this change nothing in the document said where a part
 belonged. A hostile server could permute or drop parts, the list would seal and report itself as good
