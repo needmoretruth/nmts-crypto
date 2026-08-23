@@ -251,27 +251,20 @@ pub fn unwrap_dek(
     Ok(dek)
 }
 
-/// Encrypts an item name (`E(dataKey, "nmts/v3/name", utf8(name))`).
-pub fn encrypt_name(data_key: &[u8; 32], name: &str) -> Vec<u8> {
-    seal(data_key, AAD_NAME, name.as_bytes())
-}
-
-/// Decrypts an item name; returns the UTF-8 string.
-pub fn decrypt_name(data_key: &[u8; 32], envelope: &[u8]) -> Result<String, WrapError> {
-    let pt = open(data_key, AAD_NAME, envelope)?;
-    String::from_utf8(pt).map_err(|_| WrapError::Auth)
-}
-
-/// Encrypts folder-path metadata JSON (`E(dataKey, "nmts/v3/meta", utf8(json))`).
-pub fn encrypt_meta(data_key: &[u8; 32], json: &str) -> Vec<u8> {
-    seal(data_key, AAD_META, json.as_bytes())
-}
-
-/// Decrypts folder-path metadata JSON.
-pub fn decrypt_meta(data_key: &[u8; 32], envelope: &[u8]) -> Result<String, WrapError> {
-    let pt = open(data_key, AAD_META, envelope)?;
-    String::from_utf8(pt).map_err(|_| WrapError::Auth)
-}
+// ⛔ `encrypt_name` · `decrypt_name` · `encrypt_meta` · `decrypt_meta` LIVED HERE UNTIL 2026-08-22
+//    when a sweep for dead names found them. Four public functions, each one line, each a
+//    `seal`/`open` with a fixed AAD — and NOTHING IN THE PRODUCT CALLED THEM. The browser seals a
+//    name through the generic
+//    envelope (`crypto-wasm`'s `envelope_seal` with `AAD_NAME`, see `lib/crypto/wasm-engine.ts`),
+//    the recovery tool reads names out of the sealed recovery list, and the conformance vectors
+//    build theirs from `seal_with_nonce` + the AAD. Their only callers were this crate's own tests,
+//    which therefore exercised a path no user's bytes ever take.
+//
+//    ⭐ THE COST OF KEEPING THEM WAS NOT THE TWO LINES. It was the VERB. This crate's vocabulary is
+//    `seal`/`open` for the envelope and `encrypt`/`decrypt` for the streaming file cipher — the
+//    line `wrap.rs` draws in its own header. Four `encrypt_*` names inside `wrap` erased that line
+//    for anybody reading the published crate to audit it, which is the one thing the published
+//    crate is for. The AAD constants stay: they are the format (§2 registry), not the helper.
 
 /// Seals a whole-file plaintext content hash (`E(dataKey, "nmts/v3/content-hash", hash)`).
 ///

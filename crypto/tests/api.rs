@@ -221,7 +221,7 @@ fn dek_wrap_roundtrip_and_domain_separation() {
     assert_eq!(*wrap::unwrap_dek(&data_key, &env).unwrap(), dek);
 
     // A DEK envelope must not open as a name (different AAD).
-    assert!(wrap::decrypt_name(&data_key, &env).is_err());
+    assert!(wrap::open(&data_key, wrap::AAD_NAME, &env).is_err());
     // Wrong key fails.
     assert!(wrap::unwrap_dek(&[0u8; 32], &env).is_err());
 }
@@ -230,14 +230,14 @@ fn dek_wrap_roundtrip_and_domain_separation() {
 fn name_and_meta_roundtrip() {
     let dk = [0x12u8; 32];
     let name = "report 2026 — 최종.pdf";
-    let env = wrap::encrypt_name(&dk, name);
-    assert_eq!(wrap::decrypt_name(&dk, &env).unwrap(), name);
+    let env = wrap::seal(&dk, wrap::AAD_NAME, name.as_bytes());
+    assert_eq!(wrap::open(&dk, wrap::AAD_NAME, &env).unwrap(), name.as_bytes());
 
     let meta = r#"{"path":"/a/b","tags":["x"]}"#;
-    let menv = wrap::encrypt_meta(&dk, meta);
-    assert_eq!(wrap::decrypt_meta(&dk, &menv).unwrap(), meta);
+    let menv = wrap::seal(&dk, wrap::AAD_META, meta.as_bytes());
+    assert_eq!(wrap::open(&dk, wrap::AAD_META, &menv).unwrap(), meta.as_bytes());
     // name and meta share the key but not the AAD.
-    assert!(wrap::decrypt_meta(&dk, &env).is_err());
+    assert!(wrap::open(&dk, wrap::AAD_META, &env).is_err());
 }
 
 #[test]
@@ -256,8 +256,8 @@ fn content_hash_roundtrip_and_domain_separation() {
     // Wrong key fails.
     assert!(wrap::open_content_hash(&[0u8; 32], &env).is_err());
     // A hash envelope must not open as a name, nor a name envelope as a hash.
-    assert!(wrap::decrypt_name(&dk, &env).is_err());
-    let name_env = wrap::encrypt_name(&dk, "invoice.pdf");
+    assert!(wrap::open(&dk, wrap::AAD_NAME, &env).is_err());
+    let name_env = wrap::seal(&dk, wrap::AAD_NAME, b"invoice.pdf");
     assert!(wrap::open_content_hash(&dk, &name_env).is_err());
 }
 

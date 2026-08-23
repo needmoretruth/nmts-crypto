@@ -57,6 +57,16 @@
 //! let recovered = StreamDecryptor::decrypt_all(&dek2, &stream).unwrap();
 //! assert_eq!(recovered, plaintext);
 //! ```
+//!
+//! ---
+//!
+//! Copyright (C) 2026 needmoretruth
+//!
+//! This program is free software: you can redistribute it and/or modify it under the terms of the
+//! GNU Affero General Public License, version 3 only, as published by the Free Software
+//! Foundation. It is distributed WITHOUT ANY WARRANTY; without even the implied warranty of
+//! MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the LICENSE file, or
+//! <https://www.gnu.org/licenses/agpl-3.0.html>.
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 

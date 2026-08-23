@@ -59,5 +59,7 @@ public. A report that leads to a change is credited in the commit.
 
 ## License
 
-GNU Affero General Public License v3.0 — see [`LICENSE`](LICENSE). NMTS holds the copyright and
-also uses this code in its own service under its own terms.
+GNU Affero General Public License v3.0 — see [`LICENSE`](LICENSE).
+
+Copyright © 2026 needmoretruth, who also uses this code in the NMTS service under separate terms.
+Holding all of the copyright is what makes that possible, and it is why patches are not merged.
