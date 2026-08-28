@@ -21,7 +21,7 @@ jobs:
   vectors:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Conformance vectors and unit tests
         working-directory: crypto
         run: cargo test --features vectors --verbose
