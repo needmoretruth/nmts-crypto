@@ -973,6 +973,25 @@ Written here because a specification that lists only its defences is a marketing
   gets classical X25519 and is harvestable; an OpenSSL 3.0.13 client on the same machine negotiated
   plain X25519 in the same test, because it cannot offer the hybrid at all. So this is not something
   the format fixes or can promise — it is a property of the browser the person happens to use.
+* **The login secret is STATIC, and it can end the account** (written 2026-08-30 after an outside
+  assessment named it). `authSecret` is derived from the account code, so it cannot be
+  rotated: changing it means changing the code, which changes `accountId` too and is therefore a
+  different account. It travels on account creation, on every sign-in — including the silent one a
+  browser does when its session token lapses — on the three API-key routes, and on erase-with-code;
+  it does **not** travel on ordinary requests, which carry a session token that expires in 24 hours.
+  What holding it gets somebody: sign-in, cutting API keys, and **erasing the account**. What it
+  does not get them: any file. The file key comes from a different range of the same derivation and
+  never leaves the browser, so this is a credential to the account, not to its contents.
+  ⚠ **TLS ends at the CDN, not at our server.** Everything above is inside TLS from the browser to
+  the edge and inside the tunnel from the edge to the origin — but the edge sees the plaintext body
+  in between, and that is true of the session token too. The difference is that a token expires and
+  this does not.
+  ⛔ **The fix is not a smaller change than it looks.** Sending a proof instead of the secret only
+  helps if the stored verifier cannot be replayed, and today the server stores a password hash that
+  is useless to a thief of the database. A naive challenge-response would make that stored value
+  sufficient to sign in — trading a wire exposure for a database-theft exposure. Closing it properly
+  means an augmented PAKE, which is a new derivation and therefore **NCF-4**; it is written down
+  with that reasoning rather than half-done here.
 * **A stolen unlocked device.** "Remember this device" stores a key the browser can read back
   (§1.4). Clearing it is forward-looking, not at-rest protection.
 
