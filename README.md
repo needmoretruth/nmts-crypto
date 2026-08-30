@@ -51,10 +51,9 @@ is a check that does not require trusting this crate.
 
 ## Contributions
 
-**Please send a description, not a patch.** Pull requests are not accepted and are not read:
-merging outside code carries its author's copyright with it, and reading a diff makes it hard
-to later show that a similar fix was written independently. Describing what is wrong keeps
-that clean and loses nothing — the diagnosis is the valuable part.
+Code is welcome — [CONTRIBUTING.md](CONTRIBUTING.md) says how it reaches here, and the
+[Contributor License Agreement](CLA.md) is what lets this code also run in the NMTS service under
+separate terms. A description is worth as much as a patch here: the diagnosis is the valuable part.
 
 Bug reports, questions and attacks on the design are wanted. Open an issue or write to
 nmts@nmts.me. If something puts users at risk, write first so a fix can ship before it is
@@ -71,4 +70,5 @@ Requests are read and considered on their merits; no particular outcome and no r
 promised.
 
 Copyright © 2026 needmoretruth, who also uses this code in the NMTS service under separate terms.
-Holding all of the copyright is what makes that possible, and it is why patches are not merged.
+Holding the copyright, or a licence broad enough to stand in for it, is what makes that possible —
+which is what the Contributor License Agreement is for.

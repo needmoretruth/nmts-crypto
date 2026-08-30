@@ -3,14 +3,21 @@
 # WHY THIS EXISTS: the point of this repository is that you do not have to take NMTS's word for
 # anything. "The tests pass" is worth more when GitHub says it than when the README does.
 #
-# ⛔ IT REACTS TO `push` ONLY — never to `pull_request`. A workflow that runs on pull requests
-#    executes code an outsider wrote, inside this repository. There is nothing here worth
-#    stealing (no secrets are used, and none should ever be added), but a job that a stranger
-#    can start is a door with no reason to exist. Pull requests are not accepted here anyway.
+# ⛔ IT REACTS TO `push` AND TO `pull_request` — never to `pull_request_target`. That one word is
+#    the whole security story: a `pull_request` run of a fork's branch gets a READ-ONLY token and
+#    no secrets, and GitHub holds a first-time contributor's run until a maintainer approves it;
+#    `pull_request_target` would run the same stranger's code WITH this repository's token. No
+#    secrets are used here and none should ever be added. The publish gate refuses every
+#    externally startable trigger — see deploy/lib/workflow-triggers.mjs in the source.
+#
+# ⚠ Outside code is merged here now, under the Contributor License Agreement. Accepting a patch
+#    and running nothing on it would be worse than refusing patches.
 name: tests
 
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 

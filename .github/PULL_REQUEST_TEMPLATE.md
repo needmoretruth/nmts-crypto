@@ -1,38 +1,54 @@
 <!--
-⛔ READ THIS BEFORE SPENDING THE WORK.
+BEFORE YOU OPEN THIS — one line is needed.
 
-This repository does not merge outside code. That is not about the quality of a patch — the
-copyright in this program is held in one place so that different licence terms can be offered to
-anyone who needs them, and merging a patch would move part of that copyright to its author.
-CONTRIBUTING.md has the whole reason.
+Put it at the bottom of this description, or post it as a comment on the pull request:
 
-A pull request here will be read and then closed. What DOES change the code:
+    I have read the Contributor License Agreement and I agree to it.
 
-  - an issue describing the bug, with what you did and what happened;
-  - an issue describing the change you want and why;
-  - a diff pasted INSIDE that issue, if you have already written one. It cannot be merged, but it
-    can be read, and it says exactly what you mean.
+The description is the better place. GitHub has no way to delete a pull request, so a sentence
+here stays put; a comment can be deleted by whoever wrote it.
 
-Please write in English or in Korean. Both are read.
+CLA.md is the agreement. It asks for no signature, no legal name and no address — that comment and
+the account it came from are the whole record. The same agreement covers every needmoretruth
+repository, so once is enough, ever.
 
-Bug reports, questions and ideas are welcome. They cost nothing and change everything.
+HOW THIS LANDS, because it is not the usual way. This repository is an export: the code is written
+in another repository and copied here in whole files, so a commit made HERE is overwritten by the
+next export. Your change is taken into the source it is exported from and arrives in the next one.
+This pull request is then closed with a link to the commit that carries it — closed because it
+landed, not because it was refused. Your name goes in CONTRIBUTORS.md.
 
+Write in English or in Korean. Both are read.
+-->
+
+## What this changes
+
+
+## Why
+
+
+## How to see that it works
+
+<!--
 ────────────────────────────────────────────────────────────────────────────────────────────────
 
-⛔ 일을 시작하시기 전에 읽어 주십시오.
+여시기 전에 — 한 줄이 필요합니다.
 
-이 저장소는 밖에서 온 코드를 병합하지 않습니다. 패치의 질에 대한 이야기가 아닙니다 — 이 프로그램의
-저작권을 한곳에 모아 두어야 필요한 분께 다른 라이선스 조건을 드릴 수 있고, 패치를 병합하면 그
-저작권의 일부가 쓰신 분에게 넘어갑니다. 이유 전체는 CONTRIBUTING.md 에 있습니다.
+이 **설명 칸 아래쪽**이나 pull request의 댓글에 이렇게 적어 주십시오.
 
-여기 올리신 풀 리퀘스트는 읽은 뒤에 닫힙니다. 코드를 실제로 바꾸는 것은 이쪽입니다.
+    I have read the Contributor License Agreement and I agree to it.
 
-  - 결함을 적은 이슈. 무엇을 하셨고 무엇이 일어났는지.
-  - 원하시는 변경과 그 이유를 적은 이슈.
-  - 이미 고쳐 보셨다면 그 diff를 **이슈 안에** 붙여 주십시오. 병합은 못 하지만 읽을 수 있고,
-    말로 설명하시는 것보다 정확합니다.
+설명 칸이 낫습니다 — 깃허브에는 pull request를 지우는 길이 없어 여기 적으신 글은 그대로 남고,
+댓글은 쓰신 분이 지울 수 있습니다.
 
-영어 또는 한국어로 써 주십시오. 둘 다 읽습니다.
+동의서는 CLA.md 이고, 조항마다 무슨 뜻인지는 CLA.ko.md 에 한국어로 적어 두었습니다. 서명도 실명도
+주소도 받지 않습니다 — 그 한 줄과 그것을 쓴 계정이 기록의 전부입니다. needmoretruth의 모든
+저장소가 같은 동의서를 쓰므로 **한 번이면 됩니다.**
 
-결함 신고와 질문과 의견은 환영합니다. 그것은 비용이 들지 않으면서 모든 것을 바꿉니다.
+도착하는 길이 보통과 다릅니다. 이 저장소는 내보낸 사본이라, **여기서** 만든 커밋은 다음 내보내기에
+덮어써집니다. 보내신 변경은 원본 쪽으로 들어가서 다음 내보내기 때 여기 나타나고, 그러면 이
+pull request는 그 커밋을 가리키며 닫힙니다 — **거절돼서가 아니라 들어가서 닫히는 것입니다.**
+이름은 CONTRIBUTORS.md 에 적힙니다.
+
+영어와 한국어 둘 다 읽습니다.
 -->
