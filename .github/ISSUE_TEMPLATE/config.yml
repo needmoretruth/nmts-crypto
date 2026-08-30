@@ -1,6 +1,9 @@
 blank_issues_enabled: true
 contact_links:
-  - name: Security problem
+  - name: Discord — talk about NMTS · NMTS 이야기를 나누는 곳
+    url: https://discord.gg/pcmRkVmVZk
+    about: Questions, ideas, and what people are building. English or Korean. 영어와 한국어 둘 다 좋습니다.
+  - name: Security problem · 보안 문제
     url: https://nmts.me/security
     about: Report it privately instead — email nmts@nmts.me, or use the form that needs no account.
   - name: NMTS itself — the service, the browser app, an account

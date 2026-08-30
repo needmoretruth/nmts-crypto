@@ -8,6 +8,8 @@ body:
         Questions about the format, the code and the guarantees are welcome here. Questions about
         an account or the running service go to https://nmts.me/ask instead, where they reach the
         operator without a GitHub account.
+
+        Write in English or in Korean — both are read.
   - type: textarea
     id: question
     attributes:

@@ -5,6 +5,9 @@ the recovery program, published with the format specification and the conformanc
 the format can be checked rather than believed. This file says what is welcome here and what
 cannot be accepted.
 
+**Talk about NMTS — [Discord](https://discord.gg/pcmRkVmVZk).** Questions, ideas, and what
+people are building with it. English or Korean; both are read.
+
 ## Building it yourself
 
 Rust. The vectors are behind a feature flag because they are the slow part.
@@ -25,6 +28,8 @@ to catch.
 - **Ideas**, including ones that say the current design is wrong.
 - **Independent verification.** Build it yourself, run the tests, read the format documents, and
   say where the code and the documents disagree. That is the most useful thing anyone can send.
+
+**Write in English or in Korean.** Both are read.
 
 ## What cannot be accepted, and why
 

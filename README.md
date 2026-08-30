@@ -10,6 +10,9 @@ Published so the format can be checked rather than believed.
 file is encrypted in your browser before it is uploaded, and every key comes from an account code
 that never leaves your device. This repository is part of what runs there.
 
+> **Talk about NMTS — [Discord](https://discord.gg/pcmRkVmVZk).** Questions, ideas, and
+> what people are building with it. English or Korean; both are read.
+
 The program that gets your files back if NMTS is gone is a separate repository:
 [nmts-recovery](https://github.com/needmoretruth/nmts-recovery). It calls this engine.
 

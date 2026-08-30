@@ -7,6 +7,7 @@ body:
       value: |
         ⛔ **If this is a security problem, do not file it here.** Email **nmts@nmts.me**, or use
         the form at https://nmts.me/ask, which needs no account. See SECURITY.md.
+        Write in English or in Korean — both are read.
   - type: textarea
     id: what-happened
     attributes:
