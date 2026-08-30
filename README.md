@@ -59,7 +59,13 @@ public. A report that leads to a change is credited in the commit.
 
 ## License
 
-GNU Affero General Public License v3.0 — see [`LICENSE`](LICENSE).
+Apache-2.0 — see [`LICENSE`](LICENSE). It moved here from AGPL-3.0-only on 2026-08-30; copies
+already held under the AGPL stay under it.
+
+Build on it, ship it, sell what you build with it. If you still need different terms, write to
+**nmts@nmts.me** and say why — what you are building, and which part of the licence is in the way.
+Requests are read and considered on their merits; no particular outcome and no response time is
+promised.
 
 Copyright © 2026 needmoretruth, who also uses this code in the NMTS service under separate terms.
 Holding all of the copyright is what makes that possible, and it is why patches are not merged.

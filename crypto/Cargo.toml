@@ -1,10 +1,10 @@
 [package]
 name = "nmts-crypto"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "NMTS end-to-end encryption engine — a pure, I/O-free implementation of the NCF-3 format (see docs/CRYPTO-FORMAT-NCF3.md)."
 authors = ["needmoretruth"]
-license = "AGPL-3.0-only"
+license = "Apache-2.0"
 publish = false
 
 [lib]

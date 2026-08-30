@@ -22,7 +22,7 @@ name = "nmts-crypto-wasm"
 version = "0.1.0"
 edition = "2021"
 description = "wasm-bindgen surface over nmts-crypto (NCF-1) for nmts/web. Production build only — never enable the `vectors` feature here."
-license = "AGPL-3.0-only"
+license = "Apache-2.0"
 publish = false
 
 # Declare this package as its own workspace root. Prevents cargo, when invoked on the build
