@@ -1,5 +1,5 @@
-name: Bug report
-description: Something behaves differently from what the documentation says.
+name: Bug report · 버그 신고
+description: Something behaves differently from what the documentation says. · 문서에 적힌 것과 다르게 동작합니다.
 labels: ["bug"]
 body:
   - type: markdown
@@ -8,37 +8,49 @@ body:
         ⛔ **If this is a security problem, do not file it here.** Email **nmts@nmts.me**, or use
         the form at https://nmts.me/ask, which needs no account. See SECURITY.md.
         Write in English or in Korean — both are read.
+
+        ⛔ **보안 문제라면 여기 올리지 마십시오.** **nmts@nmts.me**로 메일을 주시거나, 계정이
+        필요 없는 https://nmts.me/ask 의 양식을 쓰십시오. SECURITY.md를 보십시오.
+        영어와 한국어 둘 다 읽습니다.
   - type: textarea
     id: what-happened
     attributes:
-      label: What happened
-      description: What you did, and what you saw instead of what you expected.
+      label: What happened · 무슨 일이 있었는가
+      description: |
+        What you did, and what you saw instead of what you expected.
+        무엇을 하셨고, 기대하신 것 대신 무엇을 보셨는지 적어 주십시오.
     validations:
       required: true
   - type: textarea
     id: repro
     attributes:
-      label: How to see it again
-      description: The commands or the steps, in order. Paste the exact text rather than describing it.
+      label: How to see it again · 다시 보는 방법
+      description: |
+        The commands or the steps, in order. Paste the exact text rather than describing it.
+        명령이나 단계를 순서대로. 설명하지 마시고 실제 글자를 그대로 붙여 주십시오.
     validations:
       required: true
   - type: input
     id: version
     attributes:
-      label: Version
-      description: What `--version` prints, or the released version you are using.
+      label: Version · 버전
+      description: |
+        What `--version` prints, or the released version you are using.
+        `--version`이 찍는 것, 또는 쓰고 계신 배포 버전.
     validations:
       required: true
   - type: input
     id: platform
     attributes:
-      label: Operating system and version
+      label: Operating system and version · 운영체제와 버전
       placeholder: e.g. Ubuntu 24.04, macOS 15.3, Windows 11
     validations:
       required: true
   - type: textarea
     id: output
     attributes:
-      label: Output
-      description: Any error text, in full. It is rendered as code, so no formatting is needed.
+      label: Output · 출력
+      description: |
+        Any error text, in full. It is rendered as code, so no formatting is needed.
+        오류 글이 있으면 통째로. 코드로 표시되므로 따로 모양을 잡지 않으셔도 됩니다.
       render: text

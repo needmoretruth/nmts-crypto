@@ -1,5 +1,5 @@
-name: Question or idea
-description: Ask how something works, or say what you would want it to do.
+name: Question or idea · 질문이나 의견
+description: Ask how something works, or say what you would want it to do. · 어떻게 도는지 묻거나, 무엇을 했으면 좋겠는지 말씀해 주십시오.
 labels: ["question"]
 body:
   - type: markdown
@@ -10,14 +10,21 @@ body:
         operator without a GitHub account.
 
         Write in English or in Korean — both are read.
+
+        형식·코드·보장에 대한 질문은 여기가 맞습니다. 계정이나 돌고 있는 서비스에 대한 것은
+        https://nmts.me/ask 로 가십시오 — 깃허브 계정 없이 운영자에게 닿습니다.
+
+        영어와 한국어 둘 다 읽습니다.
   - type: textarea
     id: question
     attributes:
-      label: Your question or idea
+      label: Your question or idea · 질문이나 의견
     validations:
       required: true
   - type: textarea
     id: context
     attributes:
-      label: What you are building, if it is relevant
-      description: Not required. It often changes the answer.
+      label: What you are building, if it is relevant · 무엇을 만들고 계신지 (해당된다면)
+      description: |
+        Not required. It often changes the answer.
+        안 적으셔도 됩니다. 다만 답이 달라지는 일이 잦습니다.
