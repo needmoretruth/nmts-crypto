@@ -1,0 +1,21 @@
+name: Question or idea
+description: Ask how something works, or say what you would want it to do.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Questions about the format, the code and the guarantees are welcome here. Questions about
+        an account or the running service go to https://nmts.me/ask instead, where they reach the
+        operator without a GitHub account.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question or idea
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: What you are building, if it is relevant
+      description: Not required. It often changes the answer.

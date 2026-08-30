@@ -1,0 +1,43 @@
+name: Bug report
+description: Something behaves differently from what the documentation says.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⛔ **If this is a security problem, do not file it here.** Email **nmts@nmts.me**, or use
+        the form at https://nmts.me/ask, which needs no account. See SECURITY.md.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, and what you saw instead of what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to see it again
+      description: The commands or the steps, in order. Paste the exact text rather than describing it.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: What `--version` prints, or the released version you are using.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and version
+      placeholder: e.g. Ubuntu 24.04, macOS 15.3, Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Any error text, in full. It is rendered as code, so no formatting is needed.
+      render: text
