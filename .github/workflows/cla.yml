@@ -1,0 +1,36 @@
+# The contributor agreement, checked by a machine.
+#
+# The pull request template asks the author to leave one sentence in the description:
+# "I have read the Contributor License Agreement and I agree to it." CLA.md is the agreement, and
+# that sentence, in the author's own comment on their own pull request, is the whole record. This
+# job fails the pull request when the sentence is missing, so that a change cannot be merged on the
+# strength of a template nobody read. It reads only the pull request's description and runs no code
+# from the pull request — `pull_request`, never `pull_request_target`, so a fork's branch never runs
+# with this repository's token. On a push there is no description to read and the job passes.
+name: cla
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  agreement:
+    runs-on: ubuntu-latest
+    steps:
+      - name: The description carries the agreement sentence
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Not a pull request; nothing to check."
+            exit 0
+          fi
+          if printf '%s' "$BODY" | grep -qF 'I have read the Contributor License Agreement and I agree to it.'; then
+            echo "The agreement sentence is present."
+          else
+            echo "::error::The pull request description does not carry the sentence \"I have read the Contributor License Agreement and I agree to it.\" — CLA.md is the agreement; add the sentence to the description and this check runs again." >&2
+            exit 1
+          fi
