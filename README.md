@@ -52,6 +52,15 @@ Bug reports, questions and attacks on the design are wanted. Open an issue or wr
 nmts@nmts.me. If something puts users at risk, write first so a fix can ship before it is public.
 A report that leads to a change is credited in the commit.
 
+## Built on this?
+
+If you built something on this code — a service, a fork, a port to another language, a lighter
+client — you owe us nothing: Apache-2.0 asks for the notices and nothing more. We would still like
+to know. Write to **nmts@nmts.me**, or open an issue here if public is fine with you. If you want
+it listed, say so: [SHOWCASE.md](SHOWCASE.md) carries a link and up to ten lines about each
+project, written by the people who made it. A listing is not an
+endorsement, and we may decline or remove one without giving a reason.
+
 ## License
 
 Apache-2.0 — see [`LICENSE`](LICENSE). It moved here from AGPL-3.0-only on 2026-08-30; copies
