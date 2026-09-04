@@ -5,6 +5,11 @@ end-to-end encrypted file storage built on Walrus. It turns an account code into
 files before they leave the device, and derives the wallet that pays for storage. It touches no
 network and no disk. Published so the format can be checked rather than believed.
 
+NMTS charges nothing for the service: storage is bought from the Walrus network, for a period,
+from the user's own wallet, and one developer builds and runs it. This library, the command-line
+tool and the recovery program are open source under Apache-2.0; the server and the web app are not
+published.
+
 > Talk about NMTS on [Discord](https://discord.gg/pcmRkVmVZk), in English or Korean.
 
 The program that gets your files back if NMTS is gone is a separate repository,
