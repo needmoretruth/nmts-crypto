@@ -199,10 +199,10 @@ changes value; no reader of existing data behaves differently; the version byte 
 before. What was added is one more `HKDF-Expand` off the same `PRK`, under a label §2.1 records as
 taken. A change that altered any derivation already in §1 would still require NCF-4.
 
-⚠ **Limit.** The one-way property protects the parent's code, not the parent's *existence*. An AI
-account's own wallet is paid for from the same person's funds and its files sit on the same public
-storage, so the tree is not an anonymity boundary between the sub-accounts — it is a boundary
-between what one agent can decrypt and what another can.
+⚠ **Limit.** The one-way property protects the parent's code, not the parent's *existence*. The
+wallet of an AI account is paid for from the same person's funds and its files sit on the same
+public storage, so the tree is not an anonymity boundary between the sub-accounts — it is a
+boundary between what one agent can decrypt and what another can.
 
 ---
 
