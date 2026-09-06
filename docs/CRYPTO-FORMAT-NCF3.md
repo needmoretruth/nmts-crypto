@@ -242,6 +242,7 @@ against this section; adding a separator without adding the row fails that test.
 | `nmts/v3/content-hash` | `dataKey` | SHA-256 of a whole file's plaintext |
 | `nmts/v3/recovery-map` | `dataKey` | The recovery list (**N1**: was `recovery-manifest`) |
 | `nmts/v3/file-list` | `fileListKey` | The sealed file list (**N1**: was `manifest`) |
+| `nmts/v3/file-list-chunk` | `fileListKey` | One chunk of the chunked file list (§6.3, added 2026-09-06). A different label from the index so a chunk can never be presented as an index, or an index as a chunk |
 | `nmts/v3/share-wrap` | X-Wing shared secret | A DEK wrapped to one recipient |
 | `nmts/v3/share-name` | the file DEK | An item name re-sealed for a recipient |
 | `nmts/v3/share-content-hash` | the file DEK | A content hash re-sealed for a recipient |
@@ -912,6 +913,140 @@ and is recorded in our backlog rather than quietly left out.
 `fileListKey` / `nmts/v3/file-list` replace `manifestKey` / `nmts/v2/manifest` (N1). No behavioural
 change; the name now says which of the three former "manifests" it is.
 
+### 6.3 The chunked list — format version 2 (2026-09-06)
+
+Version 1 is one sealed blob that every edit rewrites whole. Version 2 keeps everything §6.1 proved —
+the version inside the seal, the parent link, the two reads a device checks — and moves the entries
+out of that blob into **chunks**: sealed blobs of at most 4 MiB each, addressed by their own hash,
+written only when something inside them changed. The blob the server has always stored as "the
+file list" becomes the **index**: small, and the only thing whose version and parent link matter.
+
+**Readers accept both versions. Writers write version 2.** An account converts on the first save by
+a build that knows version 2; a build that does not know it refuses `"v": 2` as it refuses any
+version it has not met (§6.1's rule — an unknown version is never rendered as an empty drive).
+
+#### 6.3.1 Index
+
+```jsonc
+{ "v": 2,
+  "seq": 41,              // as §6.1
+  "p": "<base64url>",     // as §6.1 — SHA-256 of the parent INDEX's transport string
+  "settings": { … },      // the account settings, moved here from beside the entries
+  "chunks": [             // in placement order (6.3.3)
+    { "h": "<base64url>", // SHA-256 of THIS CHUNK's transport string — the chunk's name and its pin
+      "n": 9120,          // how many entries it holds
+      "f": "<key>",       // placement key of its first entry
+      "l": "<key>" }      // placement key of its last entry
+  ] }
+```
+
+```text
+body        = flag || payload                 // flag as 6.3.4
+index_ct    = E(fileListKey, "nmts/v3/file-list", body)          // §3 envelope, unchanged label
+```
+
+The index carries no entries. `"chunks"` may be empty (an account with no items). A chunk's hash
+is computed exactly as `"p"` is — over the base64url transport string, which is canonical — and for
+the same reason: the string is what travels, so it is what is pinned. **A chunk is named by its hash
+and nothing else**: there is no chunk number in the index, so the server has no sequence to reorder
+and a chunk moved between two positions is simply a different list with the same bytes.
+
+#### 6.3.2 Chunk
+
+```jsonc
+{ "v": 2,
+  "seq": 41,              // the index version this chunk was written FOR
+  "items": [ … ] }        // entries exactly as version 1 carried them, in placement order
+```
+
+```text
+chunk_ct    = E(fileListKey, "nmts/v3/file-list-chunk", body)   // §2 — its own label
+```
+
+A chunk is immutable: an edit produces a new chunk with a new hash and the index stops naming the
+old one. `"seq"` inside the chunk is the version it was written at, not the current version — a
+chunk untouched for a hundred saves still says the version that made it, and that is correct: the
+index is what says which chunks make up version 141. The label is different from the index's so
+that a chunk handed back where an index was asked for fails at the AEAD rather than at the parser.
+
+**What the index pins.** The index is authenticated (envelope) and continued (`"p"`), and it names
+every chunk by hash. So every check §6.1 makes on the one blob now covers the whole list: a server
+that swaps, drops, duplicates or rolls back a chunk produces bytes whose hash is not in the index,
+and a server that rolls back the index is caught by §6.1 (1)–(3) exactly as before. The chunk
+carries `"seq"` as well so that a chunk from version 40 handed over for version 41's hash is refused
+twice — once by the hash, once by the number — but the hash alone is sufficient.
+
+#### 6.3.3 Placement
+
+Entries are placed by **placement key**: the entry's folder path from the drive root, each segment
+the folder's plaintext name, then the entry's own name, joined by `/`, compared by Unicode code
+point. An entry whose parent cannot be resolved is placed after every entry that can. Entries in
+the trash keep the key they had. Placement is the writer's duty and the reader's convenience: a
+reader **must** find an entry by opening the chunks the index names, and **may** open the chunk
+whose `[f, l]` range covers the folder on screen first so that the first screen is drawn before the
+rest arrive. A reader must not assume that keys inside a chunk are sorted, nor that ranges do not
+overlap — a writer that violates placement has written a slow list, not a wrong one.
+
+A writer packs entries in key order and closes a chunk when the next entry would push its
+**plaintext payload** past `CHUNK_PLAIN_MAX = 3,900,000` bytes; the unused remainder is left unused
+(the owner's rule — a chunk is never split across two blobs). The bound is on the plaintext, not the
+sealed size, so that it is decidable before compression: a raw-flag chunk of 3,900,000 bytes plus
+the flag byte and the 72-byte envelope overhead is below 4 MiB (4,194,304) by construction, and a
+compressed one is smaller still. **The server's ceiling is 4 MiB of sealed bytes**, and it is the
+only ceiling the server can measure.
+
+Later edits touch the fewest chunks they can:
+
+- a mark, a rename that keeps the folder, a share receipt, a label: rewrite the one chunk;
+- an addition: into the chunk whose range covers the key, or the nearest neighbour; if that chunk
+  would exceed the bound, it is **split** into two halves at the median key (one chunk becomes two);
+- a move between folders: a removal and an addition (at most two chunks);
+- a removal: rewrite the one chunk; when a chunk's payload falls below half the bound and merging it
+  with an adjacent chunk fits under the bound, the two are **merged** (two chunks become one);
+- a settings change: rewrite the index only.
+
+Split and merge keep the placement invariant without rewriting anything else, which is what makes
+an edit's cost independent of the list's size.
+
+#### 6.3.4 Compression flag — 0x02 is zstd
+
+```text
+body = 0x00 || utf8(json)  |  0x01 || gzip(utf8(json))  |  0x02 || zstd(utf8(json))
+```
+
+`0x02` is new with version 2 — chosen because zstd packs faster than gzip and a little smaller, and the readers were changing anyway — and applies to index and chunks alike; a version-2 writer uses it when it
+has a zstd encoder, `0x01` when it has only the platform's gzip, `0x00` otherwise. A reader accepts
+all three in either version. The zstd frame is a single standard frame with the content size
+present, so a reader can refuse a frame that claims to expand past `CHUNK_PLAIN_MAX` before it
+allocates for it. Measured 2026-09-05: compression removes about 40 % of a list's bytes
+whichever encoder is used, and zstd removes about 9 % more than gzip; the per-file envelopes it
+cannot touch are random by construction. Compression is a bonus on top of chunking, not the lever.
+
+#### 6.3.5 What the server sees
+
+Nothing new. The index is stored where the version-1 blob was and versioned by the same `seq`; a
+chunk is stored by `(account, hash)`, at most 4 MiB, immutable, and served by hash — which is why
+a client may cache it for as long as it likes (the name changes when the bytes change). The server
+learns how many chunks an account has and how large each is — the same shape of fact it already
+had from one blob's size — and learns which hashes the current index names, because the client
+tells it at every write so that unreferenced chunks can be freed. It does not learn which folder
+lives where: the placement keys are inside the seal.
+
+How many chunks an account may hold is server policy (a base allowance that grows with
+the number of items the chain has confirmed, so that claiming files nobody stored buys no room), not format. A list that will not fit is refused at
+the write with the same `413` the single blob had, naming the allowance.
+
+#### 6.3.6 Conversion, and version 1 in the wild
+
+A version-1 blob is opened as before and its entries become the in-memory list; the first save
+packs them (6.3.3), writes every chunk, then writes an index whose `"p"` is the hash of the
+version-1 blob it replaced — the parent link crosses the version boundary unchanged. From then on
+the account is version 2. Nothing converts on read: a reader that only reads never writes.
+
+Version 1 is not deprecated as a reader format, only as a writer format. A device running an older
+build after the conversion refuses the index as an unknown version, which is the designed outcome
+of §6.1's rule and the reason the version byte lives inside the seal.
+
 ---
 
 ## 7. Conformance vectors
@@ -954,6 +1089,14 @@ gains, all with fixed inputs and committed expected bytes:
    pinned against an independent implementation (`fips204`, dev-dependency only — it ships in
    nothing). Deterministic signing makes that pin exact; the vector file says the same in its own
    comment.
+
+7. **File list, version 2** (§6.3, 2026-09-06) — pinned in TypeScript, not in the crate, for the
+   reason §6.1 gives (the crate never reads a file list): `web/test/manifest-codec.test.ts` holds a
+   fixed entry set and pins its placement keys, the chunk boundaries at a small `CHUNK_PLAIN_MAX`,
+   each chunk's hash as the index names it, the index's `"p"` across a version-1 → version-2
+   conversion, and three refusals — a chunk whose hash the index does not name, a chunk opened
+   under the index label, and a `0x02` frame whose declared size exceeds the bound. The CLI reads
+   the same generated codec, so one pin covers both readers.
 
 Vectors are generated by the `vectors` cargo feature, which is the only thing in the crate that may
 supply a nonce; production constructors never accept one.
