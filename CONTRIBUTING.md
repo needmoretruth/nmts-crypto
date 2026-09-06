@@ -42,7 +42,7 @@ The description is the better place: GitHub has no way to delete a pull request,
 there stays put. Either is accepted.
 
 That is the whole agreement process — no signature, no legal name, no address, no form. The
-agreement is [CLA.md](CLA.md); [the Korean explanation](https://github.com/needmoretruth/nmts-cli/blob/main/CLA.ko.md) says what each clause
+agreement is [CLA.md](CLA.md); [the Korean explanation](CLA.ko.md) says what each clause
 means, for anyone who would rather read it that way. It is the same agreement for every needmoretruth repository,
 so agreeing once is enough.
 

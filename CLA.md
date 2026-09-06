@@ -1,6 +1,6 @@
 # needmoretruth Contributor License Agreement
 
-*[한국어 설명](https://github.com/needmoretruth/nmts-cli/blob/main/CLA.ko.md) — a reading aid. This
+*[한국어 설명](CLA.ko.md) — a reading aid. This
 English text is the agreement.*
 
 **Version 1.0.** If a word of this agreement ever changes, the version number changes with it, so
