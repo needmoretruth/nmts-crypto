@@ -18,8 +18,11 @@
 //! shareAuthSk  = HKDF-Expand(PRK, "nmts/v3/share-auth",    32)   // sender-auth scalar   (§5.5)
 //! shareSigSeed = HKDF-Expand(PRK, "nmts/v3/share-sig",     32)   // ML-DSA-44 seed ξ    (§5.2a)
 //! walletRoot   = HKDF-Expand(PRK, "nmts/v3/wallet-root",   32)   // parent of every wallet
+//! aiAcctRoot   = HKDF-Expand(PRK, "nmts/v3/ai-account-root", 32) // parent of every AI account
 //!
 //! walletSeed(N) = HKDF-Expand(walletRoot, "nmts/v3/wallet/" || dec(N), 32)   // every N >= 0
+//! aiAccountCode(N)
+//!               = HKDF-Expand(aiAcctRoot, "nmts/v3/ai-account/" || dec(N), 20)  // every N >= 1
 //! ```
 //! HKDF-Extract uses an empty salt (RFC 5869): identical to an all-zero salt, since HMAC
 //! zero-pads the key to the block size either way.
@@ -55,10 +58,15 @@
 //!
 //! # Layout
 //! * this module — the account-code chain.
+//! * [`ai_account`] — the sub-account codes an account expands (§1.5).
 //! * [`device`] — the ONE derivation that does not start from an account code.
 
+pub mod ai_account;
 pub mod device;
 
+pub use ai_account::{
+    ai_account_code_from_root, AI_ACCOUNT_ROOT_LEN, INFO_AI_ACCOUNT_PREFIX, INFO_AI_ACCOUNT_ROOT,
+};
 pub use device::{
     derive_device_wrap_key, DEVICE_WRAP_KEY_LEN, INFO_DEVICE_WRAP, MIN_PASSPHRASE_BYTES,
     PASSPHRASE_SALT_LEN,
@@ -203,6 +211,10 @@ pub enum KdfError {
     /// Argon2id cost is meaningless against a passphrase a wordlist covers instantly.
     #[error("passphrase must be at least {MIN_PASSPHRASE_BYTES} bytes, got {0}")]
     PassphraseTooShort(usize),
+    /// An AI-account index of 0. They are numbered from 1 so that walking `1..=n` reaches every
+    /// code the parent can have minted — see [`INFO_AI_ACCOUNT_PREFIX`].
+    #[error("ai-account index must be 1 or greater, got 0")]
+    AiAccountIndexZero,
 }
 
 /// Everything one account code produces, tagged with the KDF version that produced it.
@@ -233,6 +245,8 @@ pub struct DerivedKeys {
     pub share_sig_seed: Zeroizing<[u8; SHARE_SIG_SEED_LEN]>,
     /// Secret client-only root for every wallet (32 bytes) — see [`INFO_WALLET_ROOT`].
     pub wallet_root: Zeroizing<[u8; WALLET_SEED_LEN]>,
+    /// Secret client-only root for every AI account (32 bytes) — see [`INFO_AI_ACCOUNT_ROOT`].
+    pub ai_account_root: Zeroizing<[u8; AI_ACCOUNT_ROOT_LEN]>,
 }
 
 impl DerivedKeys {
@@ -247,6 +261,11 @@ impl DerivedKeys {
     /// wallet 0 is gone.
     pub fn wallet_seed_for(&self, index: u32) -> Zeroizing<[u8; WALLET_SEED_LEN]> {
         wallet_seed_from_root(&self.wallet_root, index)
+    }
+
+    /// The account code of AI account number `index` (1-based), for this account.
+    pub fn ai_account_code_for(&self, index: u32) -> Result<AccountCode, KdfError> {
+        ai_account_code_from_root(&self.ai_account_root, index)
     }
 }
 
@@ -281,6 +300,7 @@ impl core::fmt::Debug for DerivedKeys {
             .field("share_auth_secret", &"<redacted>")
             .field("share_sig_seed", &"<redacted>")
             .field("wallet_root", &"<redacted>")
+            .field("ai_account_root", &"<redacted>")
             .finish()
     }
 }
@@ -344,6 +364,7 @@ pub fn derive_from_bytes(code_bytes: &[u8; ACCOUNT_CODE_BYTES]) -> Result<Derive
     let mut share_auth_secret = Zeroizing::new([0u8; SHARE_AUTH_SECRET_LEN]);
     let mut share_sig_seed = Zeroizing::new([0u8; SHARE_SIG_SEED_LEN]);
     let mut wallet_root = Zeroizing::new([0u8; WALLET_SEED_LEN]);
+    let mut ai_account_root = Zeroizing::new([0u8; AI_ACCOUNT_ROOT_LEN]);
 
     // Expand only fails if the requested length exceeds 255*HashLen (32 here) — impossible.
     hk.expand(INFO_ACCOUNT_ID, &mut account_id)
@@ -362,6 +383,8 @@ pub fn derive_from_bytes(code_bytes: &[u8; ACCOUNT_CODE_BYTES]) -> Result<Derive
         .expect("HKDF expand length within bounds");
     hk.expand(INFO_WALLET_ROOT, &mut *wallet_root)
         .expect("HKDF expand length within bounds");
+    hk.expand(INFO_AI_ACCOUNT_ROOT, &mut *ai_account_root)
+        .expect("HKDF expand length within bounds");
 
     // `master` is zeroized when the `Zeroizing` wrapper drops at end of scope.
     Ok(DerivedKeys {
@@ -374,6 +397,7 @@ pub fn derive_from_bytes(code_bytes: &[u8; ACCOUNT_CODE_BYTES]) -> Result<Derive
         share_auth_secret,
         share_sig_seed,
         wallet_root,
+        ai_account_root,
     })
 }
 
@@ -391,7 +415,7 @@ mod tests {
         let code = [7u8; ACCOUNT_CODE_BYTES];
         let k = derive_from_bytes(&code).expect("derivation");
 
-        let outputs: [(&str, &[u8]); 8] = [
+        let outputs: [(&str, &[u8]); 9] = [
             ("account_id", &k.account_id),
             ("auth_secret", &k.auth_secret[..]),
             ("data_key", &k.data_key[..]),
@@ -400,6 +424,7 @@ mod tests {
             ("share_auth_secret", &k.share_auth_secret[..]),
             ("share_sig_seed", &k.share_sig_seed[..]),
             ("wallet_root", &k.wallet_root[..]),
+            ("ai_account_root", &k.ai_account_root[..]),
         ];
         for (i, (name_a, a)) in outputs.iter().enumerate() {
             for (name_b, b) in outputs.iter().skip(i + 1) {

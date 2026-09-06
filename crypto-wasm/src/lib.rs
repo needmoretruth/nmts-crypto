@@ -11,7 +11,7 @@
 //!
 //! Byte layouts crossing the boundary — the authority is `docs/CRYPTO-FORMAT-NCF3.md`, and every
 //! number below is repeated in code as a named constant rather than a literal:
-//! * `kdf_derive` returns **256 bytes**; the field-by-field layout is on that function, which is
+//! * `kdf_derive` returns **288 bytes**; the field-by-field layout is on that function, which is
 //!   the one place it is written down. NCF-3 replaced NCF-1/NCF-2 outright, so this is not an
 //!   additive tail on an older buffer — reading it by any older offset table yields the wrong
 //!   secret, silently. Everything except `account_id` and `share_address` must never leave the
@@ -112,11 +112,11 @@ fn parse_header(header: &[u8]) -> Result<Header, JsError> {
 // ---------------------------------------------------------------------------------------
 
 /// Total length of the [`kdf_derive`] output.
-pub const KDF_DERIVE_LEN: usize = 256;
+pub const KDF_DERIVE_LEN: usize = 288;
 
 /// Derives the account keys from the 20 raw account-code bytes (NCF-3 §1).
 ///
-/// Returns one concatenated buffer (`KDF_DERIVE_LEN` = 256 bytes) the caller slices:
+/// Returns one concatenated buffer (`KDF_DERIVE_LEN` = 288 bytes) the caller slices:
 /// ```text
 ///   0.. 16  account_id         public — the server's lookup key
 ///  16.. 48  auth_secret        secret — sent to the server over TLS at login
@@ -127,11 +127,13 @@ pub const KDF_DERIVE_LEN: usize = 256;
 /// 176..208  wallet_root        secret — parent of EVERY wallet, including the first
 /// 208..224  share_address      public — the address a user hands out to be shared with
 /// 224..256  share_sig_seed     secret — ML-DSA-44 seed; its key IS the identity root (§5.2a)
+/// 256..288  ai_account_root    secret — parent of every AI-account code (§1.5, the product rule of 2026-09-06)
 /// ```
 /// Every secret region above must be retained inside the crypto worker and never cross the
 /// postMessage boundary.
 ///
-/// ⚠ **This layout only ever grows at the TAIL.** `share_sig_seed` was appended in 2026-08-02
+/// ⚠ **This layout only ever grows at the TAIL**, and `ai_account_root` was appended on 2026-09-06
+/// under the same rule. `share_sig_seed` was appended in 2026-08-02
 /// rather than filed beside the other two share secrets, where it would read better, because
 /// inserting it there would shift `wallet_root` and `share_address` and every constant on the
 /// JS side would be silently wrong about which 32 bytes it was holding. Readability loses to
@@ -154,6 +156,7 @@ pub fn kdf_derive(code_bytes: &[u8]) -> Result<Vec<u8>, JsError> {
     out.extend_from_slice(&keys.wallet_root[..]);
     out.extend_from_slice(share::address_for(&keys.share_sig_seed).as_bytes());
     out.extend_from_slice(&keys.share_sig_seed[..]);
+    out.extend_from_slice(&keys.ai_account_root[..]);
     debug_assert_eq!(out.len(), KDF_DERIVE_LEN);
     Ok(out)
 }
@@ -185,6 +188,28 @@ pub fn wallet_seed_for(wallet_root: &[u8], index: f64) -> Result<Vec<u8>, JsErro
     let n = js_int_u64(index, "index")?;
     let n = u32::try_from(n).map_err(|_| JsError::new("wallet index must fit in 32 bits"))?;
     Ok(kdf::wallet_seed_from_root(&root, n)[..].to_vec())
+}
+
+/// The ACCOUNT CODE of AI account number `index` (1-based) from the 32-byte `ai_account_root`
+/// (NCF-3 §1.5), in the same display form `account_code_generate` returns.
+///
+/// ⛔ It takes the ROOT rather than the parent's code for the same reason `wallet_seed_for` does:
+/// the browser derives once at sign-in and keeps only the roots, so by the time somebody asks for
+/// an AI account the account code is long gone from memory and re-running Argon2id would mean
+/// asking them to type it again.
+///
+/// The 20 bytes it returns are an ordinary account code — the child derives its own chain from
+/// them, including its own AI-account root, so the tree carries on downward under one rule. The
+/// expansion is one-way: a child's code reveals nothing about the parent's.
+///
+/// Rejects `index` 0: AI accounts are numbered from 1, so that walking `1..=n` from the top code
+/// reaches every code that can exist beneath it.
+#[wasm_bindgen]
+pub fn derive_ai_account_code(ai_account_root: &[u8], index: f64) -> Result<String, JsError> {
+    let root: [u8; 32] = fixed(ai_account_root, "ai_account_root")?;
+    let n = js_int_u32(index, "index")?;
+    let code = kdf::ai_account_code_from_root(&root, n).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(code.display())
 }
 
 // ---------------------------------------------------------------------------------------

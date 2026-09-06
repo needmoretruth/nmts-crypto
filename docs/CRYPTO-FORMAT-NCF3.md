@@ -157,6 +157,53 @@ Its salt is **random per record and never a constant** — the fixed-salt argume
 depends on the input being machine-generated, and a passphrase is exactly the case it excludes.
 Minimum passphrase length is 8 bytes, enforced in the crate rather than only in the UI.
 
+### 1.5 AI accounts — a tree of codes, all recomputable from the top one (added 2026-09-06)
+
+```text
+aiAccountRoot   = HKDF-Expand(PRK, "nmts/v3/ai-account-root", 32)
+aiAccountCode(N) = HKDF-Expand(aiAccountRoot, "nmts/v3/ai-account/" || dec(N), 20)  // for N ≥ 1
+```
+
+Product rule of 2026-09-06: a person may create up to three *AI accounts* under their
+account, and each of those up to three more — twelve in all. An AI account is an ordinary NMTS
+account in every respect; the only thing that is different is where its 20 code bytes come from.
+They are **expanded, not drawn from the CSPRNG**, so the code above computes the codes below it.
+
+**The property this exists for, in both directions.**
+
+* From an account code, the codes of its AI accounts are **recomputable**. Nothing has to be
+  written down beside the main code, nothing can be lost separately, and a person who still has
+  their own code can restore the whole tree offline — `nmts-recovery --derive --ai-accounts` does
+  exactly this walk with no network.
+* From a child's code, the parent's is **NOT** recoverable, and neither is a sibling's. HKDF-Expand
+  is one-way, and the child is handed the 20 output bytes, never the root that produced them. So
+  handing an agent an AI-account code hands it that sub-account and whatever hangs below it — never
+  the account above, never the one next to it.
+
+`dec(N)` is `N` in decimal ASCII with no padding, exactly as in §1.3. **AI accounts are numbered
+from 1**, and index 0 is refused rather than answered: a parent restores its tree by walking
+`1..=n`, so a code minted outside that walk would be unreachable from the only thing a person
+keeps. The 20 bytes are encoded and displayed by the account-code encoder unchanged — one alphabet,
+one check symbol, one normalizer — because a differently-shaped child code would be a second thing
+to type and a second thing to get wrong.
+
+**The child's own chain runs from its code like any account's.** `aiAccountCode(N)` goes through
+§1.1 and §1.2 as-is, so the child has its own `master`, its own `PRK`, its own wallet root and its
+own `aiAccountRoot`. A grandchild is therefore `aiAccountCode(M)` of the child, under the same two
+lines above — one rule at every level, no special case per depth. The conformance vectors pin a
+grandchild (`ai_account_code_1_1`) for exactly that reason.
+
+⛔ **This did not move NCF-3 to a fourth version**, and the judgement is recorded rather than
+implied — the same test §2.5 applied on 2026-08-17. No existing key, envelope, address or code
+changes value; no reader of existing data behaves differently; the version byte means what it meant
+before. What was added is one more `HKDF-Expand` off the same `PRK`, under a label §2.1 records as
+taken. A change that altered any derivation already in §1 would still require NCF-4.
+
+⚠ **Limit.** The one-way property protects the parent's code, not the parent's *existence*. An AI
+account's own wallet is paid for from the same person's funds and its files sit on the same public
+storage, so the tree is not an anonymity boundary between the sub-accounts — it is a boundary
+between what one agent can decrypt and what another can.
+
 ---
 
 ## 2. Domain separator registry
@@ -178,6 +225,8 @@ against this section; adding a separator without adding the row fails that test.
 | `nmts/v3/share-sig` | 32 | ML-DSA-44 signing-key seed ξ for the identity self-signature (§5.1, §5.2a) |
 | `nmts/v3/wallet-root` | 32 | Parent of every wallet seed |
 | `nmts/v3/wallet/<N>` | 32 | Wallet `N`, expanded from `walletRoot` (§1.3) |
+| `nmts/v3/ai-account-root` | 32 | Parent of every AI-account code (§1.5, added 2026-09-06) |
+| `nmts/v3/ai-account/<N>` | **20** | The account CODE of AI account `N`, expanded from `aiAccountRoot` (§1.5). Twenty bytes, not thirty-two: the output *is* a 160-bit account code |
 | `nmts/v3/device-wrap` | 32 | "Remember this device" passphrase branch (§1.4) |
 | `nmts/v3/share-wrap` | 32 | Wrapping key for one X-Wing encapsulation, bound to the sender, the recipient and the row (§5.3) |
 | `nmts/v3/stream-commit` | 32 | Stream key commitment (§4.2) |
@@ -872,7 +921,9 @@ gains, all with fixed inputs and committed expected bytes:
 
 1. **Derivation** — one account code → `master`, `accountId`, `authSecret`, `dataKey`,
    `fileListKey`, `shareKemSeed`, `shareAuthSecret`, `shareSigSeed`, `walletRoot`, `walletSeed(0)`,
-   `walletSeed(1)`, `walletSeed(10)`.
+   `walletSeed(1)`, `walletSeed(10)`, `aiAccountRoot`, `aiAccountCode(1..3)`, and — since
+   2026-09-06 — `ai_account_code_1_1`, the first AI account OF the first AI account, which is what
+   pins §1.5's claim that the tree carries on downward with no special case per level.
 2. **Envelope** — a sealed DEK with a fixed nonce, including the commitment, and a negative case
    where the commitment is altered and opening must fail.
 3. **Stream** — single-chunk, multi-chunk, and empty; plus a multi-part set proving that a header

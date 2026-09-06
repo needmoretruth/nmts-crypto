@@ -409,7 +409,13 @@ fn gen_kdf_vectors() -> Vec<Value> {
                          `recovery_patch_name` is not a key: it is the public name the recovery \
                          manifest is stored under inside a quilt (§2.3), pinned here because the \
                          browser and the standalone recovery tool must compute the same one or a \
-                         recovery finds nothing.",
+                         recovery finds nothing. `ai_account_code_N` is the AI-ACCOUNT tree of \
+                         §1.5 (added 2026-09-06, the product rule of 2026-09-06): the code of sub-account N, expanded \
+                         from `ai_account_root` and encoded exactly like any account code. \
+                         `ai_account_code_1_1` is the first child OF that first child — it is \
+                         computed by running the whole §1 chain on `ai_account_code_1` and asking \
+                         it for its own first AI account, which is what pins the rule that the \
+                         tree carries on downward with no special case per level.",
                 "code_display": code.display(),
                 "code_canonical": code.canonical(),
                 "code_bytes_hex": hex::encode(bytes),
@@ -426,10 +432,29 @@ fn gen_kdf_vectors() -> Vec<Value> {
                 "wallet_seed_hex": hex::encode(*keys.wallet_seed_for(0)),
                 "wallet_seed_1_hex": hex::encode(*keys.wallet_seed_for(1)),
                 "wallet_seed_10_hex": hex::encode(*keys.wallet_seed_for(10)),
+                "ai_account_root_hex": hex::encode(*keys.ai_account_root),
+                "ai_account_code_1": ai_code(&keys, 1),
+                "ai_account_code_2": ai_code(&keys, 2),
+                "ai_account_code_3": ai_code(&keys, 3),
+                "ai_account_code_1_1": grandchild_code(&keys),
                 "recovery_patch_name": manifest::recovery_patch_name(&keys.data_key),
             })
         })
         .collect()
+}
+
+/// The display form of AI account `index` under `keys` (NCF-3 §1.5).
+fn ai_code(keys: &kdf::DerivedKeys, index: u32) -> String {
+    keys.ai_account_code_for(index)
+        .expect("ai-account indexes here are >= 1")
+        .display()
+}
+
+/// The first AI account OF the first AI account — the whole §1 chain run again on a derived code.
+fn grandchild_code(keys: &kdf::DerivedKeys) -> String {
+    let child = keys.ai_account_code_for(1).expect("index >= 1");
+    let child_keys = kdf::derive_from_bytes(child.as_bytes()).expect("a child code is a code");
+    ai_code(&child_keys, 1)
 }
 
 /// Recomputes just the Argon2id master for the vector file (mirrors kdf.rs constants).
@@ -1375,6 +1400,35 @@ fn verify_kdf() {
                 "wallet_seed({index})"
             );
         }
+
+        // §1.5 — the AI-account tree (added 2026-09-06, the product rule of 2026-09-06). The root first, then the three
+        // codes it expands to, then the grandchild: if any of those four strings moved, an account
+        // could no longer recompute the codes it handed to an agent and the tree would be lost
+        // with no other symptom.
+        assert_eq!(
+            hex::encode(*keys.ai_account_root),
+            v["ai_account_root_hex"].as_str().unwrap(),
+            "ai_account_root"
+        );
+        for index in 1u32..=3 {
+            assert_eq!(
+                ai_code(&keys, index),
+                v[format!("ai_account_code_{index}")].as_str().unwrap(),
+                "ai_account_code({index})"
+            );
+        }
+        assert_eq!(
+            grandchild_code(&keys),
+            v["ai_account_code_1_1"].as_str().unwrap(),
+            "ai_account_code_1_1 — the tree must carry on downward under one rule"
+        );
+        // Every AI-account code must be an ordinary, parseable account code.
+        for index in 1u32..=3 {
+            let display = v[format!("ai_account_code_{index}")].as_str().unwrap();
+            AccountCode::parse(display).expect("an AI-account code parses like any account code");
+        }
+        // 0 has no code: the parent walks 1..=n, so a code outside that walk cannot exist.
+        assert!(keys.ai_account_code_for(0).is_err(), "index 0 was answered");
 
         // account_id_b64 must be the base64url of account_id.
         assert_eq!(
