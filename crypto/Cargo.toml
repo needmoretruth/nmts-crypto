@@ -1,6 +1,6 @@
 [package]
 name = "nmts-crypto"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "NMTS end-to-end encryption engine — a pure, I/O-free implementation of the NCF-3 format (see docs/CRYPTO-FORMAT-NCF3.md)."
 authors = ["needmoretruth"]

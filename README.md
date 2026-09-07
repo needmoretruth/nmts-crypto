@@ -1,7 +1,9 @@
 # nmts-crypto
 
-The end-to-end encryption engine that runs in your browser when you use [NMTS](https://nmts.me),
-end-to-end encrypted file storage built on Walrus. It turns an account code into keys, encrypts
+The end-to-end encryption engine that runs in your browser when you use [NMTS](https://nmts.me)
+— **NeedMoreTruthStorage**, end-to-end encrypted cloud storage on the Walrus network, built by one
+developer ([needmoretruth](https://github.com/needmoretruth)) for people and for AI agents. The site
+is **https://nmts.me**. It turns an account code into keys, encrypts
 files before they leave the device, and derives the wallet that pays for storage. It touches no
 network and no disk. Published so the format can be checked rather than believed.
 
@@ -15,7 +17,7 @@ published.
 The program that gets your files back if NMTS is gone is a separate repository,
 [nmts-recovery](https://github.com/needmoretruth/nmts-recovery). It calls this engine.
 
-## What is here
+## 📁 What is here
 
 - `crypto/` — the engine.
 - `crypto-wasm/` — the boundary that exposes it to a browser.
@@ -27,7 +29,7 @@ The server, the web interface, and the payment and storage logic are not here an
 The engine assembles published standard algorithms — Argon2id, HKDF-SHA-256, XChaCha20-Poly1305,
 X-Wing (X25519 + ML-KEM-768), ML-DSA-44, X25519 — and invents no cryptography.
 
-## The specification is normative
+## 📜 The specification is normative
 
 [`docs/CRYPTO-FORMAT-NCF3.md`](docs/CRYPTO-FORMAT-NCF3.md) defines the format; this crate
 implements it; the vectors decide. Where they disagree, the specification and the vectors win.
@@ -37,7 +39,7 @@ implements it; the vectors decide. Where they disagree, the specification and th
 - **§9** — what the format does not stop, including the fact that reading this source tells you
   what a browser *should* receive, not what it did.
 
-## Checking it
+## 🔍 Checking it
 
 ```sh
 cd crypto && cargo test --features vectors
@@ -47,7 +49,7 @@ cd crypto-wasm && wasm-pack build --target web
 The vectors are plain JSON. Implementing the specification in another language and comparing is
 a check that does not require trusting this crate.
 
-## Contributions
+## 🤝 Contributions
 
 Code is welcome — [CONTRIBUTING.md](CONTRIBUTING.md) says how it reaches here, and the
 [Contributor License Agreement](CLA.md) is what lets this code also run in the NMTS service under
