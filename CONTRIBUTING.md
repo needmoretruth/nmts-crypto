@@ -2,8 +2,7 @@
 
 `nmts-crypto` is the encryption engine that runs in the [NMTS](https://nmts.me) browser app and in
 the recovery program, published with the format specification and the conformance vectors so that
-the format can be checked rather than believed. This file says what is welcome here and what
-cannot be accepted.
+anyone can reimplement the format and compare the output byte for byte.
 
 **Talk about NMTS — [Discord](https://discord.gg/pcmRkVmVZk).** Questions, ideas, and what
 people are building with it. English or Korean; both are read.
@@ -18,8 +17,7 @@ cd crypto-wasm && wasm-pack build --target web
 ```
 
 The conformance vectors are fixed inputs with their expected bytes committed beside them. If a
-change ever makes one of them move, that is the format changing — which is the thing they exist
-to catch.
+change makes one of them move, the format has changed.
 
 ## What is welcome
 
@@ -27,9 +25,9 @@ to catch.
 - **Questions** about the format, the code, or a guarantee you are trying to check.
 - **Ideas**, including ones that say the current design is wrong.
 - **Independent verification.** Build it yourself, run the tests, read the format documents, and
-  say where the code and the documents disagree. That is the most useful thing anyone can send.
+  say where the code and the documents disagree.
 
-**Write in English or in Korean.** Both are read.
+**Write in English or in Korean.**
 
 ## Sending code
 
@@ -41,12 +39,12 @@ a comment on it:
 The description is the better place: GitHub has no way to delete a pull request, so a sentence
 there stays put. Either is accepted.
 
-That is the whole agreement process — no signature, no legal name, no address, no form. The
+Nothing else is needed: no signature, legal name, address or form. The
 agreement is [CLA.md](CLA.md); [the Korean explanation](CLA.ko.md) says what each clause
 means, for anyone who would rather read it that way. It is the same agreement for every needmoretruth repository,
 so agreeing once is enough.
 
-The short version of what it does: you keep the copyright in what you wrote, and we get a licence
+You keep the copyright in what you wrote, and we get a licence
 broad enough to keep the whole program under one owner. That matters because different licence
 terms are offered to anyone whose situation Apache-2.0 does not fit, and that offer can only be
 made by whoever holds all of it.
@@ -97,7 +95,7 @@ patch, and it cannot be taken as one.
 - Work that is not yours to give, or that carries a licence you have not told us about.
 - A change with no way to tell whether it works. New behaviour comes with a test.
 - A rewrite of something that already works, sent without asking first. Say what you want to
-  change in an issue before writing it, and you will not waste an afternoon.
+  change in an issue before writing it.
 
 ## Conduct
 

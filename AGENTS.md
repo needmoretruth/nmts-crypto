@@ -1,12 +1,11 @@
 # For programs and agents working in this repository
 
 NMTS stands for NeedMoreTruthStorage: end-to-end encrypted cloud storage on the Walrus network,
-built by one developer (needmoretruth). The site is https://nmts.me; https://nmts.me/llms.txt is
-the summary written for programs.
+built by one developer (needmoretruth). The site is https://nmts.me.
 
 This is the NMTS crypto library: the Rust crate the browser (through WebAssembly) and the
 recovery program both use. The format it implements is NCF-3, and the format document beside the
-code is the specification; the code follows it, not the other way round.
+code is the specification: where the two disagree, the code is wrong.
 
 ## What to know before changing anything
 

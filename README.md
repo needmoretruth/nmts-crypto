@@ -2,10 +2,10 @@
 
 The end-to-end encryption engine that runs in your browser when you use [NMTS](https://nmts.me)
 — **NeedMoreTruthStorage**, end-to-end encrypted cloud storage on the Walrus network, built by one
-developer ([needmoretruth](https://github.com/needmoretruth)) for people and for AI agents. The site
-is **https://nmts.me**. It turns an account code into keys, encrypts
+developer ([needmoretruth](https://github.com/needmoretruth)) for people and for AI agents. It turns an account code into keys, encrypts
 files before they leave the device, and derives the wallet that pays for storage. It touches no
-network and no disk. Published so the format can be checked rather than believed.
+network and no disk. The format document and the committed test vectors let anyone reimplement NCF-3 and compare the
+output byte for byte.
 
 NMTS charges nothing for the service: storage is bought from the Walrus network, for a period,
 from the user's own wallet, and one developer builds and runs it. This library, the command-line
@@ -31,8 +31,9 @@ X-Wing (X25519 + ML-KEM-768), ML-DSA-44, X25519 — and invents no cryptography.
 
 ## 📜 The specification is normative
 
-[`docs/CRYPTO-FORMAT-NCF3.md`](docs/CRYPTO-FORMAT-NCF3.md) defines the format; this crate
-implements it; the vectors decide. Where they disagree, the specification and the vectors win.
+[`docs/CRYPTO-FORMAT-NCF3.md`](docs/CRYPTO-FORMAT-NCF3.md) defines the format, and
+this crate implements it. Where the crate disagrees with the specification or the vectors, the
+crate is wrong.
 
 - **§1** — the derivation chain. Every key comes from one 160-bit account code, and which keys
   ever reach the server is stated exactly.
@@ -53,7 +54,7 @@ a check that does not require trusting this crate.
 
 Code is welcome — [CONTRIBUTING.md](CONTRIBUTING.md) says how it reaches here, and the
 [Contributor License Agreement](CLA.md) is what lets this code also run in the NMTS service under
-separate terms. A description is worth as much as a patch here: the diagnosis is the valuable part.
+separate terms. A written description of a problem is as welcome as a patch.
 
 Bug reports, questions and attacks on the design are wanted. Open an issue or write to
 nmts@nmts.me. If something puts users at risk, write first so a fix can ship before it is public.
@@ -71,7 +72,7 @@ endorsement, and we may decline or remove one without giving a reason.
 ## License
 
 Apache-2.0 — see [`LICENSE`](LICENSE). It moved here from AGPL-3.0-only on 2026-08-30; copies
-already held under the AGPL stay under it. Build on it, ship it, sell what you build with it. If
+already held under the AGPL stay under it. If
 you need different terms, write to **nmts@nmts.me** and say why; requests are read on their
 merits, and no outcome or response time is promised.
 
