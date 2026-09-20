@@ -1,0 +1,182 @@
+{
+  "format": "NCF-3",
+  "frozen": false,
+  "kind_wallet_signature": 1,
+  "locator_info": "nmts/v3/opener-locator/1",
+  "message": [
+    {
+      "account": 1,
+      "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "app": null,
+      "label": "plain",
+      "message_hex": "4e4d54532077616c6c6574207369676e2d696e0a0a5369676e696e672074686973206d657373616765206c65747320746869732077616c6c6574206f70656e20796f7572204e4d5453206163636f756e742e0a5369676e206974206f6e6c79206f6e206e6d74732e6d65206f7220696e206120746f6f6c20796f75207472757374207769746820796f75722066696c65732e0a416e796f6e652077686f20676574732074686973207369676e61747572652063616e206f70656e20796f75722066696c65730a756e74696c20796f752072656d6f766520746869732077616c6c65742066726f6d20746865206163636f756e742e0a0a57616c6c65743a203078616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161610a4163636f756e743a20310a56657273696f6e3a2031",
+      "message_len": 342,
+      "message_sha256": "c737c1b559ba3d421ff50eeccf706e995021f7e915c0f9c81063fb8a03034e76",
+      "message_utf8": "NMTS wallet sign-in\n\nSigning this message lets this wallet open your NMTS account.\nSign it only on nmts.me or in a tool you trust with your files.\nAnyone who gets this signature can open your files\nuntil you remove this wallet from the account.\n\nWallet: 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAccount: 1\nVersion: 1"
+    },
+    {
+      "account": 12,
+      "address": "0xbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "app": "example.com",
+      "label": "with_app",
+      "message_hex": "4e4d54532077616c6c6574207369676e2d696e0a0a5369676e696e672074686973206d657373616765206c65747320746869732077616c6c6574206f70656e20796f7572204e4d5453206163636f756e742e0a5369676e206974206f6e6c79206f6e206e6d74732e6d65206f7220696e206120746f6f6c20796f75207472757374207769746820796f75722066696c65732e0a416e796f6e652077686f20676574732074686973207369676e61747572652063616e206f70656e20796f75722066696c65730a756e74696c20796f752072656d6f766520746869732077616c6c65742066726f6d20746865206163636f756e742e0a0a57616c6c65743a203078626161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161610a4163636f756e743a2031320a4170703a206578616d706c652e636f6d0a56657273696f6e3a2031",
+      "message_len": 360,
+      "message_sha256": "9b943e0c835f2cd759c5b1248675a1fbb87cc1f5f6facfd78c31c4e67842faf2",
+      "message_utf8": "NMTS wallet sign-in\n\nSigning this message lets this wallet open your NMTS account.\nSign it only on nmts.me or in a tool you trust with your files.\nAnyone who gets this signature can open your files\nuntil you remove this wallet from the account.\n\nWallet: 0xbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAccount: 12\nApp: example.com\nVersion: 1"
+    }
+  ],
+  "message_negative": [
+    {
+      "account": 0,
+      "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "app": null,
+      "label": "account_zero",
+      "refusal": "AccountZero",
+      "refusal_message": "account number must be 1 or greater, got 0"
+    },
+    {
+      "account": 1,
+      "address": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "app": null,
+      "label": "address_uppercase",
+      "refusal": "AddressNotCanonical",
+      "refusal_message": "wallet address must be 0x followed by 64 lowercase hex characters"
+    },
+    {
+      "account": 1,
+      "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "app": null,
+      "label": "address_short",
+      "refusal": "AddressNotCanonical",
+      "refusal_message": "wallet address must be 0x followed by 64 lowercase hex characters"
+    },
+    {
+      "account": 1,
+      "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+      "app": null,
+      "label": "address_long",
+      "refusal": "AddressNotCanonical",
+      "refusal_message": "wallet address must be 0x followed by 64 lowercase hex characters"
+    },
+    {
+      "account": 1,
+      "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+      "app": null,
+      "label": "address_trailing_lf",
+      "refusal": "AddressNotCanonical",
+      "refusal_message": "wallet address must be 0x followed by 64 lowercase hex characters"
+    },
+    {
+      "account": 1,
+      "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n",
+      "app": null,
+      "label": "address_crlf",
+      "refusal": "AddressNotCanonical",
+      "refusal_message": "wallet address must be 0x followed by 64 lowercase hex characters"
+    },
+    {
+      "account": 1,
+      "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "app": "Example",
+      "label": "app_uppercase",
+      "refusal": "AppNotCanonical",
+      "refusal_message": "app must be 1 to 64 characters of a-z, 0-9, dot and hyphen, starting and ending with a letter or digit"
+    },
+    {
+      "account": 1,
+      "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "app": "a\nWallet: 0x0",
+      "label": "app_newline",
+      "refusal": "AppNotCanonical",
+      "refusal_message": "app must be 1 to 64 characters of a-z, 0-9, dot and hyphen, starting and ending with a letter or digit"
+    }
+  ],
+  "note": "The opener layer is ADDITIVE and re-wrappable: a slot carries its own version byte. These vectors pin what today's slots are, not what slots must be forever.",
+  "section": "1.7",
+  "signature": [
+    {
+      "flag": 0,
+      "label": "ed25519",
+      "locator_hex": "1a395e32aca9e11d16361622523c900f",
+      "serialized_hex": "00000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f1111111111111111111111111111111111111111111111111111111111111111",
+      "serialized_len": 97
+    },
+    {
+      "flag": 1,
+      "label": "secp256k1",
+      "locator_hex": "1a395e32aca9e11d16361622523c900f",
+      "serialized_hex": "01000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f111111111111111111111111111111111111111111111111111111111111111111",
+      "serialized_len": 98
+    },
+    {
+      "flag": 2,
+      "label": "secp256r1",
+      "locator_hex": "1a395e32aca9e11d16361622523c900f",
+      "serialized_hex": "02000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f111111111111111111111111111111111111111111111111111111111111111111",
+      "serialized_len": 98
+    }
+  ],
+  "signature_negative": [
+    {
+      "label": "empty",
+      "refusal_message": "the wallet returned an empty signature",
+      "serialized_hex": ""
+    },
+    {
+      "label": "multisig",
+      "refusal_message": "multisig wallets sign differently depending on which signers take part",
+      "serialized_hex": "03000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "label": "zklogin",
+      "refusal_message": "zkLogin signatures change with every session",
+      "serialized_hex": "05000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "label": "passkey",
+      "refusal_message": "passkey wallets produce a different signature every time",
+      "serialized_hex": "06000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "label": "unknown_flag_04",
+      "refusal_message": "unknown Sui signature scheme 0x04",
+      "serialized_hex": "04000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "label": "unknown_flag_ff",
+      "refusal_message": "unknown Sui signature scheme 0xff",
+      "serialized_hex": "ff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "label": "ed25519_wrong_length",
+      "refusal_message": "a 0x00 signature is 97 bytes serialized, got 98",
+      "serialized_hex": "00000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f111111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "label": "secp256k1_wrong_length",
+      "refusal_message": "a 0x01 signature is 98 bytes serialized, got 97",
+      "serialized_hex": "01000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "label": "flag_only",
+      "refusal_message": "a 0x00 signature is 97 bytes serialized, got 1",
+      "serialized_hex": "00"
+    }
+  ],
+  "slot": {
+    "locator_hex": "1a395e32aca9e11d16361622523c900f",
+    "nmts_key_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3",
+    "nonce_hex": "404142434445464748494a4b4c4d4e4f5051525354555657",
+    "serialized_hex": "00000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f1111111111111111111111111111111111111111111111111111111111111111",
+    "slot_hex": "0101404142434445464748494a4b4c4d4e4f5051525354555657ffcbc82e746c6032f7c050a533907fb61943e31151743429e814b56fafc2c3731018b88e",
+    "slot_sha256": "4687c12517e5e17a678bb553e9ee2c9d2c4b6e044a1960434565a186f1578042"
+  },
+  "slot_len": 62,
+  "slot_negative": {
+    "other_locator_hex": "9ab51399415eb6979f0f24f273c98739",
+    "other_serialized_hex": "00000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3e1111111111111111111111111111111111111111111111111111111111111111",
+    "refusal_message": "this signature does not open this slot"
+  },
+  "slot_version": 1,
+  "wrap_info": "nmts/v3/opener-wrap/1"
+}

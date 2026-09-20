@@ -204,6 +204,90 @@ wallet of an AI account is paid for from the same person's funds and its files s
 public storage, so the tree is not an anonymity boundary between the sub-accounts — it is a
 boundary between what one agent can decrypt and what another can.
 
+### 1.7 Openers — a removable way in, and the one part of this document that is NOT frozen (added 2026-09-20)
+
+Everything above is frozen because a value derived under it can never be recomputed any other way.
+This subsection is the opposite case, deliberately, and the distinction is the whole design.
+
+An **opener** is a way to reach an account's NMTS key. The key itself never changes; what an opener
+adds is another road to it, and roads can be added and taken away — LUKS key slots, in the same
+shape and for the same reason. The first opener is a Sui wallet's signature; a WebAuthn passkey's
+PRF output is the next, and a slot carries a `kind` byte so the two are told apart.
+
+```text
+sig(64)  = the PURE signature inside the wallet's serialized one (flag || sig || pk)
+wrapKey  = HKDF-Expand(HKDF-Extract(salt = "", ikm = sig), "nmts/v3/opener-wrap/1",    32)
+locator  = HKDF-Expand(HKDF-Extract(salt = "", ikm = sig), "nmts/v3/opener-locator/1", 16)
+slot     = version(1) || kind(1) || nonce(24) || XChaCha20-Poly1305(wrapKey, nmtsKey(20),
+                                                                   aad = version || kind)
+```
+
+A slot is exactly **62 bytes**. `version` is `0x01`; `kind` is `0x01` for a wallet signature and
+`0x02` for a passkey PRF. The two leading bytes are both plaintext and AAD: readable, so a client
+knows how to open the slot, and authenticated, so nobody can re-label one kind's slot as another's.
+HKDF-SHA-256 with an empty extract salt, §1.2's choice for §1.2's reason — the input cannot be
+predicted without the wallet's private key, so there is no dictionary for a salt to defeat.
+
+**The message (version 1).** LF endings, no trailing newline, ASCII:
+
+```text
+NMTS wallet sign-in
+
+Signing this message lets this wallet open your NMTS account.
+Sign it only on nmts.me or in a tool you trust with your files.
+Anyone who gets this signature can open your files
+until you remove this wallet from the account.
+
+Wallet: <the signing Sui address: 0x and 64 LOWERCASE hex characters>
+Account: <decimal, no padding, from 1>
+App: <optional product scope: 1–64 of a-z0-9.- , starting and ending alphanumeric>
+Version: 1
+```
+
+The `App:` line appears only when one is given, between `Account` and `Version`. With it, one
+wallet opens a different account per product; without it, the same wallet opens the same account
+everywhere — the caller chooses, and the screen that offers the choice is where the price is
+written. The heading differs from the signature-derived road's on purpose: one signature must never
+serve two purposes, and the first line is what keeps them apart. Every value is **refused rather
+than repaired** when it is not already canonical, because all three sit inside the bytes a person
+reads in the wallet popup, and a caller that could smuggle a newline through one of them could
+write that popup's text.
+
+**Which wallets.** A slot only reopens if the same wallet returns the same signature, so the scheme
+flag is an **allow list**: `0x00` Ed25519 (97 bytes serialized), `0x01` secp256k1 and `0x02`
+secp256r1 (98). `0x03` multisig, `0x05` zkLogin and `0x06` passkey are refused with their own
+reasons, and any other flag is refused as unknown — a scheme nobody has judged must not arrive by
+being new. An accepted flag at the wrong length is refused rather than sliced. This format verifies
+nothing: checking the signature against the `Wallet` address is the client's step, with the Sui
+library.
+
+⛔ **The signature and the wrapping key never leave the crypto boundary.** The entry points take
+the SERIALIZED signature and answer with a locator, a sealed slot, or an opened key — never with
+the 64 signature bytes and never with the 32 wrapping bytes.
+
+⚠ **What the server holds and what it learns.** One opaque 62-byte record, whose account it is,
+its kind, and the day it was made. Not which wallet, not which passkey — the locator comes from the
+secret — and not what is inside.
+
+⚠ **Removing an opener is forward-looking only.** It means "this wallet can no longer open the
+account". It does not mean the wallet never knew the NMTS key: anything that opened the account
+once holds the root, and the only answer to that is a new account. Whoever holds the 64 signature
+bytes holds the account for as long as the slot exists.
+
+⭐ **Why this is not frozen, and what that buys.** A slot carries its own version byte, lives under
+a name its owner can list and delete, and holds a key that exists independently of it. So the day
+the message or the derivation has to change — a wallet that starts hedging its signatures, a
+scheme that has to be dropped, a post-quantum successor — the next sign-in re-wraps the same NMTS
+key into a new slot and removes the old one, and nothing is lost. That is exactly what §1 cannot
+do, and it is why the road through §1 is frozen and this one is not. Being unfrozen does not make
+it loose: the message is pinned byte for byte, every refusal is pinned by name, and the vectors
+live in their own fixture (`crypto/tests/vectors/ncf3-openers.json`) so that `ncf3.json` stays
+untouched.
+
+⛔ **This is an ADDITION, not NCF-4**, by the same test §2.5 applied on 2026-08-17 and again for
+§1.5: no existing key, envelope, address or code changes value, and no reader of existing data
+behaves differently. What is taken is two labels §2.1 records below.
+
 ---
 
 ## 2. Domain separator registry
@@ -227,6 +311,8 @@ against this section; adding a separator without adding the row fails that test.
 | `nmts/v3/wallet/<N>` | 32 | Wallet `N`, expanded from `walletRoot` (§1.3) |
 | `nmts/v3/ai-account-root` | 32 | Parent of every AI-account code (§1.5, added 2026-09-06) |
 | `nmts/v3/ai-account/<N>` | **20** | The account CODE of AI account `N`, expanded from `aiAccountRoot` (§1.5). Twenty bytes, not thirty-two: the output *is* a 160-bit account code |
+| `nmts/v3/opener-wrap/1` | 32 | The key one opener's slot is sealed under (§1.7, added 2026-09-20). The trailing `1` is the frozen version of the pair (message, derivation), not an index: a `/2` would be a new row, never an edit of this one |
+| `nmts/v3/opener-locator/1` | **16** | The name the server files that slot under (§1.7). Sixteen bytes because it is a lookup key, not a secret — and it comes from the secret, which is why the server cannot tell whose wallet it is |
 | `nmts/v3/device-wrap` | 32 | "Remember this device" passphrase branch (§1.4) |
 | `nmts/v3/share-wrap` | 32 | Wrapping key for one X-Wing encapsulation, bound to the sender, the recipient and the row (§5.3) |
 | `nmts/v3/stream-commit` | 32 | Stream key commitment (§4.2) |
@@ -1097,6 +1183,15 @@ gains, all with fixed inputs and committed expected bytes:
    conversion, and three refusals — a chunk whose hash the index does not name, a chunk opened
    under the index label, and a `0x02` frame whose declared size exceeds the bound. The CLI reads
    the same generated codec, so one pin covers both readers.
+
+8. **Openers** (§1.7, 2026-09-20) — in their OWN fixture, `crypto/tests/vectors/ncf3-openers.json`,
+   because the opener layer is re-wrappable and `ncf3.json` is the file whose promise is that
+   nothing in it ever moves. It pins the message for two inputs (hex, length, SHA-256, with and
+   without an `App:` line), every refusal by its sentence — account `0`, an uppercased address, a
+   short one, a long one, one carrying a trailing LF or a CRLF, an app with a capital or a newline,
+   the three refused scheme flags, two unknown flags and two wrong lengths — the locator for all
+   three accepted schemes, and a seal/open round trip at a fixed nonce with the negative that
+   matters: a signature one bit away yields a different locator and does not open the slot.
 
 Vectors are generated by the `vectors` cargo feature, which is the only thing in the crate that may
 supply a nonce; production constructors never accept one.

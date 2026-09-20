@@ -20,6 +20,7 @@
 //! | [`wrap`]     | §3     | Envelope (DEK wrap, name/meta) and share tokens. |
 //! | [`share`]    | §5     | Share identity: hybrid post-quantum key agreement, the address, sender authentication. |
 //! | [`manifest`] | §6     | Recovery-manifest types + single-envelope encrypt/decrypt. |
+//! | [`opener`]   | §1.7   | Openers: the NMTS key wrapped into a removable slot. ⚠ ADDITIVE and NOT frozen. |
 //! | [`b64`]      | §2     | base64url (no padding) used for IDs and tokens. |
 //! | [`rng`]      | —      | The single OS-CSPRNG randomness seam. |
 //!
@@ -78,6 +79,9 @@ pub mod codes;
 pub mod framing;
 pub mod kdf;
 pub mod manifest;
+// Openers — the slot layer (§1.7, added 2026-09-20). ⚠ NOT part of the frozen derivation chain:
+// a slot carries its own version and is re-wrapped on the next sign-in when anything here moves.
+pub mod opener;
 pub mod rng;
 pub mod share;
 pub mod wrap;
@@ -87,5 +91,6 @@ pub use codes::{AccountCode, CodeError, VoucherCode};
 pub use framing::{FramingError, Header, StreamDecryptor, StreamEncryptor};
 pub use kdf::{DerivedKeys, KdfError, KdfVersion};
 pub use manifest::{Item, ManifestError, Part, Quilt, RecoveryManifest};
+pub use opener::{opener_from_signature, opener_message, Opener, OpenerRefusal};
 pub use share::{ShareAddress, ShareError, SharePublicKey};
 pub use wrap::WrapError;
