@@ -382,7 +382,7 @@ everyone who does not already hold the key that opens what it points at.
 UUID (the upload path's per-item client id). A differently shaped string beside them would mark
 which patch is worth attention and undo the previous paragraph, so the fingerprint is rendered in
 that same shape, version and variant bits included. The cost is six of the 128 bits; impersonating
-a *specific* account's name still means finding a preimage of a 122-bit value.
+a *specific* account's name still means finding a preimage of a 122-bit value (about 2⁶¹ with Grover's algorithm on a quantum computer, still out of reach).
 
 ⛔ **This did not move NCF-3 to a fourth version, and the judgement is recorded rather than
 implied.** The frozen surface is the §1 derivation chain and the §5 share identity: no existing
@@ -649,7 +649,7 @@ only thing that can derive, on a value the design says is immutable.
 **Length stays 16 bytes** and the display form is unchanged — 27 Crockford symbols in three groups
 of nine, the last carrying the check symbol, visibly different from an account code's eight groups
 of four. Truncating to 128 bits costs nothing that matters here: impersonating a *specific*
-address means finding a preimage (2¹²⁸), not a collision. A birthday attack produces two addresses
+address means finding a preimage (2¹²⁸ classically; about 2⁶⁴ with Grover's algorithm on a quantum computer, still out of reach), not a collision. A birthday attack produces two addresses
 that collide with each other, which buys an attacker nothing, because the address they must match
 is fixed by their target's account code.
 
