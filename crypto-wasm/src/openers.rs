@@ -1,11 +1,11 @@
 //! Openers — the NMTS key wrapped into a removable slot (NCF-3 §1.7).
 //!
-//! ⛔ ITS OWN FILE BECAUSE `lib.rs` HAS A CEILING (2026-09-20 · `check:size`). The four exports
-//!    below are the whole opener surface; their names and shapes are exactly what
-//!    `deploy/wasm-conformance-openers.mjs` judges.
+//! ⛔ ITS OWN FILE BECAUSE `lib.rs` HAS A CEILING (2026-09-20 · `check:size`). The four wallet
+//!    exports and the four passkey exports (2026-09-23) below are the whole opener surface; their
+//!    names and shapes are what `deploy/wasm-conformance-openers.mjs` judges.
 //!
-//! ⛔ THREE OF THESE FOUR TAKE THE SERIALIZED SIGNATURE AND NONE OF THEM RETURNS IT. The 64 pure
-//!    bytes and the 32-byte wrapping key are the account; an export that handed either back would
+//! ⛔ THE WALLET EXPORTS TAKE THE SERIALIZED SIGNATURE, THE PASSKEY EXPORTS TAKE THE PRF RESULT,
+//!    AND NONE OF THEM RETURNS EITHER. Those bytes and the 32-byte wrapping key are the account; an export that handed either back would
 //!    put them in a JS value nothing can wipe, on the far side of the boundary the Rust crate
 //!    zeroizes behind. So the answers are exactly what may travel: a locator, a sealed slot, and
 //!    an opened NMTS key. (Review finding 2-B3, as an API shape rather than a sentence.)
@@ -85,6 +85,44 @@ pub fn opener_seal(serialized_signature: &[u8], nmts_key: &[u8]) -> Result<Vec<u
 pub fn opener_open(serialized_signature: &[u8], slot: &[u8]) -> Result<Vec<u8>, JsError> {
     let opener = opener::opener_from_signature(serialized_signature)
         .map_err(|e| JsError::new(&e.to_string()))?;
+    let key = opener
+        .open(slot)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(key.to_vec())
+}
+
+/// The PRF salt every NMTS passkey is asked about (NCF-3 §1.7): SHA-256 of
+/// `nmts/v3/passkey-prf/1`. The page passes these 32 bytes as WebAuthn `prf.eval.first`.
+#[wasm_bindgen]
+pub fn passkey_prf_salt() -> Vec<u8> {
+    opener::passkey_prf_salt().to_vec()
+}
+
+/// The 16-byte LOCATOR a passkey's 32-byte PRF result yields — what a passkey sign-in asks the
+/// server for (NCF-3 §1.7). Throws for a result of any other length.
+#[wasm_bindgen]
+pub fn passkey_locator(prf: &[u8]) -> Result<Vec<u8>, JsError> {
+    let opener = opener::opener_from_passkey_prf(prf).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(opener.locator().to_vec())
+}
+
+/// The 62-byte SLOT holding `nmts_key` under a passkey's PRF result — kind `0x02`, a fresh nonce
+/// from WebCrypto, the same layout as a wallet's slot.
+#[wasm_bindgen]
+pub fn passkey_seal(prf: &[u8], nmts_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let key: [u8; 20] = fixed(nmts_key, "nmts_key")?;
+    let opener = opener::opener_from_passkey_prf(prf).map_err(|e| JsError::new(&e.to_string()))?;
+    let slot = opener
+        .seal(&key)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(slot.to_vec())
+}
+
+/// The 20 NMTS-key bytes inside a passkey's slot. One indistinguishable refusal for a different
+/// passkey or altered bytes, for the reason `opener_open` gives.
+#[wasm_bindgen]
+pub fn passkey_open(prf: &[u8], slot: &[u8]) -> Result<Vec<u8>, JsError> {
+    let opener = opener::opener_from_passkey_prf(prf).map_err(|e| JsError::new(&e.to_string()))?;
     let key = opener
         .open(slot)
         .map_err(|e| JsError::new(&e.to_string()))?;

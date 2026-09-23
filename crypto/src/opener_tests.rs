@@ -297,3 +297,48 @@ fn debug_never_prints_the_wrapping_key() {
     assert!(!printed.contains(&format!("{:?}", &wrap[..4])));
     assert!(!printed.contains(&hex_locator(&<[u8; 16]>::try_from(&wrap[..16]).unwrap())));
 }
+
+#[test]
+fn a_passkey_slot_opens_only_with_the_same_prf_and_says_it_is_a_passkey() {
+    let prf: [u8; PASSKEY_PRF_LEN] = core::array::from_fn(|i| 0x60 + i as u8);
+    let key: [u8; ACCOUNT_CODE_BYTES] = core::array::from_fn(|i| 0xa0 + i as u8);
+    let opener = opener_from_passkey_prf(&prf).unwrap();
+    assert_eq!(opener.kind(), KIND_PASSKEY_PRF);
+    let slot = opener.seal(&key).unwrap();
+    assert_eq!(
+        slot[1], KIND_PASSKEY_PRF,
+        "the kind byte is what a list shows"
+    );
+    assert_eq!(
+        *opener_from_passkey_prf(&prf).unwrap().open(&slot).unwrap(),
+        key
+    );
+    let mut other = prf;
+    other[31] ^= 1;
+    let stranger = opener_from_passkey_prf(&other).unwrap();
+    assert_ne!(stranger.locator(), opener.locator());
+    assert_eq!(stranger.open(&slot), Err(OpenerRefusal::DoesNotOpen));
+    // Relabelled as a wallet's slot, it fails the tag instead of opening as the other kind.
+    let mut relabelled = slot;
+    relabelled[1] = KIND_WALLET_SIGNATURE;
+    assert_eq!(opener.open(&relabelled), Err(OpenerRefusal::DoesNotOpen));
+}
+
+#[test]
+fn a_prf_result_of_any_other_length_is_refused_by_its_length() {
+    for len in [0usize, 16, 31, 33, 64] {
+        assert_eq!(
+            opener_from_passkey_prf(&vec![7u8; len]).map(|o| o.locator()),
+            Err(OpenerRefusal::PrfLength { got: len })
+        );
+    }
+}
+
+#[test]
+fn the_passkey_salt_is_the_hash_of_its_registered_label() {
+    // A tripwire like the one above: moving the label renames every passkey slot.
+    assert_eq!(PASSKEY_PRF_LABEL, b"nmts/v3/passkey-prf/1");
+    let mut h = Sha256::new();
+    h.update(b"nmts/v3/passkey-prf/1");
+    assert_eq!(passkey_prf_salt()[..], h.finalize()[..]);
+}

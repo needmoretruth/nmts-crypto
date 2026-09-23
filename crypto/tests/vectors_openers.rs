@@ -18,6 +18,9 @@
 //!    a slot under, so two implementations disagreeing about it means a sign-in that finds nothing.
 //! 4. **Seal and open, with a fixed nonce**, plus the negative that matters: a signature one bit
 //!    away opens neither the slot nor the same locator.
+//! 5. **The passkey opener** (added 2026-09-23): the PRF salt every NMTS passkey is asked about,
+//!    and a fixed 32-byte PRF result's locator and slot. The salt is the one value a passkey slot's
+//!    name hangs on, so two implementations must agree on it byte for byte.
 //!
 //! * Regenerate (writes the JSON):
 //!   `cargo test --features vectors gen_opener_fixture -- --ignored --nocapture`
@@ -28,9 +31,10 @@
 
 use nmts_crypto::codes::ACCOUNT_CODE_BYTES;
 use nmts_crypto::opener::{
-    opener_from_signature, opener_message, OpenerRefusal, ECDSA_SERIALIZED_LEN,
-    ED25519_SERIALIZED_LEN, FLAG_ED25519, FLAG_MULTISIG, FLAG_PASSKEY, FLAG_SECP256K1,
-    FLAG_SECP256R1, FLAG_ZKLOGIN, KIND_WALLET_SIGNATURE, OPENER_LOCATOR_INFO, OPENER_WRAP_INFO,
+    opener_from_passkey_prf, opener_from_signature, opener_message, passkey_prf_salt,
+    OpenerRefusal, ECDSA_SERIALIZED_LEN, ED25519_SERIALIZED_LEN, FLAG_ED25519, FLAG_MULTISIG,
+    FLAG_PASSKEY, FLAG_SECP256K1, FLAG_SECP256R1, FLAG_ZKLOGIN, KIND_PASSKEY_PRF,
+    KIND_WALLET_SIGNATURE, OPENER_LOCATOR_INFO, OPENER_WRAP_INFO, PASSKEY_PRF_LABEL,
     PURE_SIGNATURE_LEN, SLOT_LEN, SLOT_NONCE_LEN, SLOT_VERSION,
 };
 use serde_json::{json, Value};
@@ -64,6 +68,11 @@ fn nmts_key() -> [u8; ACCOUNT_CODE_BYTES] {
 /// the `vectors` feature — a production build that accepts one can be made to repeat one.
 fn slot_nonce() -> [u8; SLOT_NONCE_LEN] {
     core::array::from_fn(|i| 0x40 + i as u8)
+}
+
+/// Fixed passkey PRF result: bytes 0x60..0x7F.
+fn prf_a() -> [u8; 32] {
+    core::array::from_fn(|i| 0x60 + i as u8)
 }
 
 /// `flag || sig || pk`, the serialized form a Sui wallet hands back.
@@ -148,6 +157,10 @@ fn build() -> Value {
     let slot = opener_a
         .seal_with_nonce(&slot_nonce(), &key)
         .expect("known kind");
+    let passkey = opener_from_passkey_prf(&prf_a()).expect("32 bytes");
+    let passkey_slot = passkey
+        .seal_with_nonce(&slot_nonce(), &key)
+        .expect("known kind");
 
     let long_address = format!("0x{}b", &ADDRESS_A[2..]);
     let short_address = format!("0x{}", &ADDRESS_A[3..]);
@@ -211,6 +224,20 @@ fn build() -> Value {
             "other_serialized_hex": hex::encode(&ser_b),
             "other_locator_hex": hex::encode(opener_b.locator()),
             "refusal_message": opener_b.open(&slot).expect_err("must refuse").to_string(),
+        },
+
+        "passkey": {
+            "prf_label": String::from_utf8_lossy(PASSKEY_PRF_LABEL),
+            "prf_salt_hex": hex::encode(passkey_prf_salt()),
+            "kind_passkey_prf": KIND_PASSKEY_PRF,
+            "prf_hex": hex::encode(prf_a()),
+            "locator_hex": hex::encode(passkey.locator()),
+            "nmts_key_hex": hex::encode(key),
+            "nonce_hex": hex::encode(slot_nonce()),
+            "slot_hex": hex::encode(passkey_slot),
+            "refusal_short": opener_from_passkey_prf(&prf_a()[..31])
+                .expect_err("must refuse")
+                .to_string(),
         },
     })
 }
@@ -348,4 +375,32 @@ fn opener_fixture_holds() {
     // The two serialized lengths the allow list fixes, asserted rather than assumed.
     assert_eq!(ED25519_SERIALIZED_LEN, 97);
     assert_eq!(ECDSA_SERIALIZED_LEN, 98);
+
+    // The passkey opener: the salt from its label by an independent hash, then the fixed PRF
+    // result's locator and slot through the shipped entry point.
+    let p = &doc["passkey"];
+    let label = p["prf_label"].as_str().unwrap();
+    assert_eq!(label.as_bytes(), PASSKEY_PRF_LABEL);
+    assert_eq!(
+        sha256_hex(label.as_bytes()),
+        p["prf_salt_hex"].as_str().unwrap()
+    );
+    assert_eq!(
+        hex::encode(passkey_prf_salt()),
+        p["prf_salt_hex"].as_str().unwrap()
+    );
+    let prf = hex::decode(p["prf_hex"].as_str().unwrap()).unwrap();
+    let passkey = opener_from_passkey_prf(&prf).expect("32 bytes");
+    assert_eq!(
+        hex::encode(passkey.locator()),
+        p["locator_hex"].as_str().unwrap()
+    );
+    let pslot = passkey.seal_with_nonce(&nonce, &key).expect("known kind");
+    assert_eq!(hex::encode(pslot), p["slot_hex"].as_str().unwrap());
+    assert_eq!(u64::from(pslot[1]), p["kind_passkey_prf"].as_u64().unwrap());
+    assert_eq!(*passkey.open(&pslot).expect("opens"), key);
+    assert_eq!(
+        p["refusal_short"].as_str().unwrap(),
+        OpenerRefusal::PrfLength { got: 31 }.to_string()
+    );
 }

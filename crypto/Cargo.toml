@@ -1,6 +1,6 @@
 [package]
 name = "nmts-crypto"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 description = "NMTS end-to-end encryption engine — a pure, I/O-free implementation of the NCF-3 format (see docs/CRYPTO-FORMAT-NCF3.md)."
 authors = ["needmoretruth"]
@@ -65,6 +65,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Typed errors.
 thiserror = "2"
+# The recovery phrase: the account code's 20 bytes as 15 BIP-39 words, English or Korean.
+# rust-bitcoin's crate, CC0-1.0; only the two lists are compiled in. `default-features = false`
+# leaves out its Unicode normalization tables — they doubled the browser engine, and the only
+# normalization a Korean phrase needs is Hangul's own arithmetic (phrase.rs does it).
+bip39 = { version = "3.0.0", default-features = false, features = ["korean"] }
 # Optional: WASM bindings surface (no bindings shipped yet; reserved for nmts/web).
 wasm-bindgen = { version = "0.2", optional = true }
 

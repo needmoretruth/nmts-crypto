@@ -82,6 +82,7 @@ pub mod manifest;
 // Openers — the slot layer (§1.7, added 2026-09-20). ⚠ NOT part of the frozen derivation chain:
 // a slot carries its own version and is re-wrapped on the next sign-in when anything here moves.
 pub mod opener;
+pub mod phrase;
 pub mod rng;
 pub mod share;
 pub mod wrap;
@@ -91,6 +92,10 @@ pub use codes::{AccountCode, CodeError, VoucherCode};
 pub use framing::{FramingError, Header, StreamDecryptor, StreamEncryptor};
 pub use kdf::{DerivedKeys, KdfError, KdfVersion};
 pub use manifest::{Item, ManifestError, Part, Quilt, RecoveryManifest};
-pub use opener::{opener_from_signature, opener_message, Opener, OpenerRefusal};
+pub use opener::{
+    opener_from_passkey_prf, opener_from_signature, opener_message, passkey_prf_salt, Opener,
+    OpenerRefusal,
+};
+pub use phrase::{parse_key_or_phrase, PhraseError, PhraseLanguage};
 pub use share::{ShareAddress, ShareError, SharePublicKey};
 pub use wrap::WrapError;

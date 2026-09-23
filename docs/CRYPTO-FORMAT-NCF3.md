@@ -284,9 +284,61 @@ it loose: the message is pinned byte for byte, every refusal is pinned by name, 
 live in their own fixture (`crypto/tests/vectors/ncf3-openers.json`) so that `ncf3.json` stays
 untouched.
 
+**The second opener: a passkey (added 2026-09-23).** A WebAuthn passkey or security key with the
+PRF extension answers a salt with 32 bytes bound to the site and to that salt. Every NMTS passkey
+is asked about ONE salt, and its answer takes the wallet signature's place in the two expansions:
+
+```text
+prfSalt  = SHA-256("nmts/v3/passkey-prf/1")          (32 bytes; WebAuthn `prf.eval.first`)
+prf(32)  = the authenticator's PRF result for prfSalt, with user verification
+wrapKey, locator, slot = as above with ikm = prf, and kind = 0x02
+```
+
+The browser hashes `prfSalt` once more with WebAuthn's own prefix before the authenticator sees it;
+`prfSalt` is the value a client passes, and the one the vectors pin. A PRF result of any other
+length than 32 is refused by its length. The server stores nothing about the passkey — no public
+key, no credential id, no device name: the locator comes from the secret, exactly as a wallet's
+does. The kind byte in the AAD keeps a passkey slot and a wallet slot from opening as each other.
+
 ⛔ **This is an ADDITION, not NCF-4**, by the same test §2.5 applied on 2026-08-17 and again for
 §1.5: no existing key, envelope, address or code changes value, and no reader of existing data
-behaves differently. What is taken is two labels §2.1 records below.
+behaves differently. What is taken is two labels §2.1 records below and the passkey salt's label
+in §2.3.
+
+### 1.8 The recovery phrase — the account code in another spelling (added 2026-09-23)
+
+The 20 bytes of an account code can also be written as a **BIP-39 mnemonic**: 15 words from the
+English or the Korean BIP-39 list. It is a spelling, not a derivation. Nothing in §1.1–§1.7 reads
+the words; a phrase is turned back into `code_bytes` and everything after that is §1.1 unchanged,
+so a phrase opens exactly what its code opens, no more and no less.
+
+```text
+words(code) = BIP-39 mnemonic of code_bytes(20): entropy = those bytes, checksum = the first
+              5 bits of SHA-256(entropy), 165 bits = 15 words of 11 bits, English or Korean list
+code(words) = BIP-39 entropy of the words, after: split on any whitespace · drop a piece with no
+              letter in it (a list number: "1." "2)" "11–15") · lowercase · Hangul syllables
+              decomposed to conjoining jamo (Unicode §3.12, the list's own form) · an English piece
+              of four or more letters that begins exactly one list word is read as that word.
+              All 15 words come from ONE list, else the input is refused.
+```
+
+- **Which one an input is.** Twelve or more whitespace-separated pieces, each at least two
+  characters long, are read as a phrase; anything else is read as an account code. A code typed in
+  its groups has at most nine pieces, and typed one symbol at a time its pieces are one character.
+- **Fixed length.** 15 words, because the code is 160 bits. Twelve and 24 words carry 128 and 256
+  bits and are refused by their count, never truncated or padded — a 12-word wallet seed is not an
+  account code and must not become one.
+- **Refusals, by name.** `phrase:count:{n}` · `phrase:word:{i}` (the 1-based position of the first
+  word that is in neither list, or not in the list the words before it came from) ·
+  `phrase:checksum`. A failed checksum is never corrected: a phrase with one wrong word is refused,
+  not guessed at.
+- **Output form.** Words separated by one ASCII space; Korean words composed (NFC), which is what a
+  keyboard types. Input is accepted composed or decomposed.
+- **The lists are BIP-39's and no other.** A language without a published BIP-39 list gets no
+  phrase: a list only this format can read would be read by no other tool.
+
+⛔ **This is an ADDITION, not NCF-4.** No key, envelope, address or code changes value; this is a
+second way to type the input of §1.1, and it takes no separator.
 
 ---
 
@@ -333,6 +385,7 @@ against this section; adding a separator without adding the row fails that test.
 | `nmts/v3/share-name` | the file DEK | An item name re-sealed for a recipient |
 | `nmts/v3/share-content-hash` | the file DEK | A content hash re-sealed for a recipient |
 | `nmts/v3/device-label` | `dataKey` | A device's display name |
+| `nmts/v3/device-preview` | `dataKey` | A photo's small preview, made and kept on one device and never sent (added 2026-09-23) |
 | `nmts/v3/device-record` | `deviceWrapKey` | The "remember this device" record |
 | `nmts/v3/delegation` | `dataKey` | The standing auto-approve record |
 | `nmts/v3/wallet-import` | `dataKey` | An imported (non-derived) wallet's private key |
@@ -345,6 +398,7 @@ against this section; adding a separator without adding the row fails that test.
 | `nmts/v3/share-payload` | Commitment over the row a share envelope is stored beside (§5.3, **A6**) |
 | `nmts/v3/identity-bundle` | FIPS 204 signature context (`ctx`) of the identity self-signature (§5.2a) |
 | `nmts/v3/recovery-name` | The name the recovery manifest is stored under inside a quilt (§2.5) |
+| `nmts/v3/passkey-prf/1` | SHA-256 of this is the PRF salt every NMTS passkey is asked about (§1.7, added 2026-09-23) |
 
 ### 2.4 What N1 fixed
 
@@ -1192,6 +1246,14 @@ gains, all with fixed inputs and committed expected bytes:
    the three refused scheme flags, two unknown flags and two wrong lengths — the locator for all
    three accepted schemes, and a seal/open round trip at a fixed nonce with the negative that
    matters: a signature one bit away yields a different locator and does not open the slot.
+   Since 2026-09-23 it also pins the passkey opener: the PRF salt, a fixed 32-byte PRF result's
+   locator and slot, and the refusal for a result of the wrong length.
+
+9. **The recovery phrase** (§1.8, 2026-09-23) — in its own fixture,
+   `crypto/tests/vectors/ncf3-words.json`: five codes (all zero, all one and three random) in both
+   lists, and four refusals — two words swapped (checksum), a word from the other list, fourteen
+   words, and a word in neither list. It was written by an independent implementation
+   (`@scure/bip39`), not by the crate, and both the crate and the browser engine are held to it.
 
 Vectors are generated by the `vectors` cargo feature, which is the only thing in the crate that may
 supply a nonce; production constructors never accept one.

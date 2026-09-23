@@ -38,11 +38,18 @@
 //! knew the NMTS key. A device that opened the account once holds the root, and the only answer to
 //! that is a new account. The screens that offer removal say so; this module's part is to make
 //! removal a real thing rather than a claim.
+//!
+//! # The second opener: a passkey's PRF output (added 2026-09-23)
+//! A WebAuthn passkey or security key with the PRF extension returns 32 bytes bound to the site
+//! and to the salt it is asked about. Every NMTS passkey is asked about ONE salt,
+//! [`passkey_prf_salt`], and its 32 bytes go through the same two expansions as a wallet's
+//! signature, into a slot of kind [`KIND_PASSKEY_PRF`]. The kind is inside the slot's AAD, so a
+//! passkey slot can never be opened as a wallet slot or the other way round.
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::codes::ACCOUNT_CODE_BYTES;
@@ -85,12 +92,21 @@ pub const SLOT_VERSION: u8 = 0x01;
 /// Slot kind: a Sui wallet's signature over the [`opener_message`] text.
 pub const KIND_WALLET_SIGNATURE: u8 = 0x01;
 
-/// Slot kind: a WebAuthn passkey's PRF output. Reserved — nothing in this crate writes it yet.
+/// Slot kind: a WebAuthn passkey's PRF output ([`opener_from_passkey_prf`]).
 ///
-/// ⚠ The number is spent here rather than later on purpose: the kind is inside the slot's AAD, so
-/// two implementations disagreeing about which byte means "passkey" would produce slots neither
-/// could open, and the cost of reserving it now is one line.
+/// ⚠ The number was spent before the first passkey slot was written, on purpose: the kind is inside
+/// the slot's AAD, so two implementations disagreeing about which byte means "passkey" would
+/// produce slots neither could open.
 pub const KIND_PASSKEY_PRF: u8 = 0x02;
+
+/// The label whose SHA-256 is the PRF salt every NMTS passkey is asked about (NCF-3 §2.3).
+///
+/// ⛔ Changing it renames every passkey slot: the same passkey would answer with different bytes,
+/// and its slot would no longer be found. A `/2` would be a new registry row and a re-wrap.
+pub const PASSKEY_PRF_LABEL: &[u8] = b"nmts/v3/passkey-prf/1";
+
+/// A WebAuthn PRF result is exactly this long.
+pub const PASSKEY_PRF_LEN: usize = 32;
 
 /// Exactly 62 bytes: `version(1) || kind(1) || nonce(24) || ciphertext(20) || tag(16)`.
 pub const SLOT_LEN: usize = 2 + SLOT_NONCE_LEN + ACCOUNT_CODE_BYTES + SLOT_TAG_LEN;
@@ -219,6 +235,12 @@ pub enum OpenerRefusal {
     SlotVersion {
         /// The first byte of the slot.
         version: u8,
+    },
+    /// A passkey's PRF result that is not [`PASSKEY_PRF_LEN`] bytes.
+    #[error("a passkey's PRF result is {PASSKEY_PRF_LEN} bytes, got {got}")]
+    PrfLength {
+        /// The length handed in.
+        got: usize,
     },
     /// A kind byte this layer has not reserved, met while sealing.
     #[error("unknown opener kind 0x{kind:02x}")]
@@ -405,6 +427,26 @@ pub fn opener_from_signature(serialized: &[u8]) -> Result<Opener, OpenerRefusal>
     Ok(opener_from_secret(&signature[..], KIND_WALLET_SIGNATURE))
 }
 
+/// The PRF salt (`eval.first`) every NMTS passkey is asked about: SHA-256 of [`PASSKEY_PRF_LABEL`].
+///
+/// The browser hashes it once more with its own WebAuthn prefix before the authenticator sees it,
+/// so these bytes are an input to that step, never the authenticator's salt itself.
+pub fn passkey_prf_salt() -> [u8; 32] {
+    Sha256::digest(PASSKEY_PRF_LABEL).into()
+}
+
+/// The opener a passkey's 32-byte PRF result yields — slot kind [`KIND_PASSKEY_PRF`].
+///
+/// The same two expansions as a wallet's signature. The result cannot be guessed without the
+/// authenticator and the person's fingerprint, face or PIN, which is why no extract salt is needed
+/// here either.
+pub fn opener_from_passkey_prf(prf: &[u8]) -> Result<Opener, OpenerRefusal> {
+    if prf.len() != PASSKEY_PRF_LEN {
+        return Err(OpenerRefusal::PrfLength { got: prf.len() });
+    }
+    Ok(opener_from_secret(prf, KIND_PASSKEY_PRF))
+}
+
 /// Both expansions of one opener secret. Private: the only secrets this layer knows how to take
 /// are the ones its public constructors accept, and a `pub` version of this would be a door for
 /// any 32 bytes somebody had lying around.
@@ -437,8 +479,8 @@ impl Opener {
         self.locator
     }
 
-    /// Which kind of opener this is — [`KIND_WALLET_SIGNATURE`] here. It is written into the slot
-    /// and into the slot's AAD.
+    /// Which kind of opener this is — [`KIND_WALLET_SIGNATURE`] or [`KIND_PASSKEY_PRF`]. It is
+    /// written into the slot and into the slot's AAD.
     pub fn kind(&self) -> u8 {
         self.kind
     }

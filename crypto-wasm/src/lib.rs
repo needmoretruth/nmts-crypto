@@ -46,7 +46,6 @@
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
-use nmts_crypto::codes::{self, AccountCode};
 use nmts_crypto::framing::{
     decrypt_chunk, Header, PartPlacement, StreamDecryptor, StreamEncryptor, AAD_LEN, HEADER_LEN,
     NONCE_LEN, NONCE_PREFIX_LEN,
@@ -57,8 +56,10 @@ use wasm_bindgen::{prelude::*, JsError};
 
 // ⛔ TWO SIBLING FILES BECAUSE THIS ONE HAS A CEILING (2026-09-20 · `check:size`), not because the
 //    surface is split: `convert` holds the JS-boundary helpers every export below calls, and
-//    `openers` holds the four NCF-3 §1.7 exports. `#[wasm_bindgen]` exports by symbol, so a
-//    function's module changes neither its JavaScript name nor its shape.
+//    `openers` holds the four NCF-3 §1.7 exports and `codes` the account-code and phrase ones.
+//    `#[wasm_bindgen]` exports by symbol, so a function's module changes neither its JavaScript
+//    name nor its shape.
+pub mod codes;
 mod convert;
 pub mod openers;
 
@@ -844,38 +845,6 @@ impl Default for WasmSha256Hasher {
     fn default() -> Self {
         Self::new()
     }
-}
-
-// ---------------------------------------------------------------------------------------
-// Account / voucher codes (NCF-1 §1, §7) — used by the account lifecycle UI (Wave B2)
-// ---------------------------------------------------------------------------------------
-
-/// Generates a fresh 160-bit account code and returns its display string
-/// (`XXXX-XXXX-…-XXXXC`). The bytes never leave the worker except as this one-time string.
-#[wasm_bindgen]
-pub fn account_code_generate() -> String {
-    AccountCode::generate().display()
-}
-
-/// Parses+validates a user-entered account code (any spacing/case), returning the 20 raw
-/// bytes. Errors if the check symbol fails.
-#[wasm_bindgen]
-pub fn account_code_parse(input: &str) -> Result<Vec<u8>, JsError> {
-    let c = AccountCode::parse(input).map_err(|e| JsError::new(&e.to_string()))?;
-    Ok(c.as_bytes().to_vec())
-}
-
-/// The display string for a set of 20 raw account-code bytes.
-#[wasm_bindgen]
-pub fn account_code_display(code_bytes: &[u8]) -> Result<String, JsError> {
-    let cb: [u8; 20] = fixed(code_bytes, "code_bytes")?;
-    Ok(AccountCode::from_bytes(cb).display())
-}
-
-/// `SHA-256(normalize(input))` — the voucher redemption hash for arbitrary user input.
-#[wasm_bindgen]
-pub fn voucher_hash_from_input(input: &str) -> Vec<u8> {
-    codes::voucher_hash_from_input(input).to_vec()
 }
 
 /// The name this account's recovery manifest is stored under inside a quilt (NCF-3 §2.5).

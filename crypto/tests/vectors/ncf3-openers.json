@@ -92,6 +92,17 @@
     }
   ],
   "note": "The opener layer is ADDITIVE and re-wrappable: a slot carries its own version byte. These vectors pin what today's slots are, not what slots must be forever.",
+  "passkey": {
+    "kind_passkey_prf": 2,
+    "locator_hex": "e3f665d24c450a7352cb3f46e52ff1b1",
+    "nmts_key_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3",
+    "nonce_hex": "404142434445464748494a4b4c4d4e4f5051525354555657",
+    "prf_hex": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+    "prf_label": "nmts/v3/passkey-prf/1",
+    "prf_salt_hex": "ca4e563fc3803d34c65d11221c6d6df70c2c0cef75eaeb458facc18499df6aa3",
+    "refusal_short": "a passkey's PRF result is 32 bytes, got 31",
+    "slot_hex": "0102404142434445464748494a4b4c4d4e4f50515253545556575dd8751778232b296c1130429c1c86bd313366fc44c492a84ea996da939de9d110e62cfc"
+  },
   "section": "1.7",
   "signature": [
     {

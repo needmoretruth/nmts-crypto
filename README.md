@@ -37,6 +37,9 @@ crate is wrong.
 
 - **§1** — the derivation chain. Every key comes from one 160-bit account code, and which keys
   ever reach the server is stated exactly.
+- **§1.8** — the recovery phrase: the same account code written as 15 BIP-39 words, from the
+  English or the Korean list. It is a spelling, not a derivation, so a phrase opens exactly what its
+  code opens.
 - **§9** — what the format does not stop, including the fact that reading this source tells you
   what a browser *should* receive, not what it did.
 
