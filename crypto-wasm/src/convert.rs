@@ -2,7 +2,7 @@
 //!
 //! ⛔ ITS OWN FILE BECAUSE `lib.rs` HAS A CEILING (2026-09-20). `check:size` holds Rust files to
 //!    700 lines and `lib.rs` is far past it; the opener exports that arrived with NCF-3 §1.7 had
-//!    to live somewhere, and these four are what they and every other export share. This crate's
+//!    to live somewhere, and these helpers are what they and every other export share. This crate's
 //!    own header says it "only translates between the JS `Uint8Array`/`string` world and the
 //!    crate's typed Rust API" — this file is that translation and nothing else. No cryptography
 //!    crosses it.
@@ -58,6 +58,17 @@ pub(crate) fn u64_to_js(value: u64, what: &str) -> Result<f64, JsError> {
         )));
     }
     Ok(value as f64)
+}
+
+/// The item id as both sides must spell it before it is hashed into a share's payload commitment.
+///
+/// Lowercased, and nothing else. The sender takes the id from a drive listing and the recipient
+/// from an inbox row; both are the same UUID serialised by the same server, so they already agree
+/// — this exists so that a future difference in CASE alone cannot turn every share into "could not
+/// be opened", which is a failure no screen could explain. Any other difference SHOULD break the
+/// unwrap, because it means the two sides are not talking about the same file.
+pub(crate) fn canonical_item_id(item_id: &str) -> String {
+    item_id.to_ascii_lowercase()
 }
 
 /// Parses+validates a 72-byte NCF-3 header prefix, mapping failures to a JS exception.

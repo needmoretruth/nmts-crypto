@@ -88,10 +88,10 @@
 //!
 //! What that buys is room to move later under an address that can never change: replacing
 //! `pk_kem` or `pk_auth` is a `key_epoch` bump re-signed by the same root, and a different body
-//! layout is a new `identity_version` under the same root. ⚠ **Neither procedure exists yet** —
-//! both counters are always zero here, and a replacement flow has to be specified before any
-//! non-zero value is published. The anchor is lattice-based on purpose: it is the one value that
-//! must survive an adversary who breaks the classical keys.
+//! layout is a new `identity_version` under the same root. ⚠ **Neither procedure exists yet**:
+//! `key_epoch` is always zero here. `derivation_index` numbers an account's identities (§5.9,
+//! [`public_key_at`]), each a root of its own. The anchor is lattice-based on purpose: it is the
+//! one value that must survive an adversary who breaks the classical keys.
 //!
 //! ⛔ **This is the only signature this format ever makes.** Envelopes, files and messages are
 //! never signed — see the deniability argument below, which the self-signature does not touch: it
@@ -180,12 +180,17 @@ use ml_dsa::{
 };
 use sha2::{Digest, Sha256};
 use x_wing::kem::{Decapsulator, KeyExport};
-use x_wing::{Ciphertext, Decapsulate, DecapsulationKey, EncapsulationKey};
+use x_wing::{DecapsulationKey, EncapsulationKey};
 use zeroize::Zeroizing;
 
 use crate::codes::{self, CodeError};
 use crate::kdf::{SHARE_AUTH_SECRET_LEN, SHARE_KEM_SEED_LEN, SHARE_SIG_SEED_LEN};
 use crate::wrap::{self, WrapError, DEK_LEN, WRAPPED_DEK_LEN};
+
+// Numbered identities (§5.9). Identity 0's operations below are these at index 0.
+#[cfg(any(test, feature = "vectors"))]
+pub use crate::share_at::wrap_dek_for_as_with_randomness;
+pub use crate::share_at::{address_at, public_key_at, unwrap_dek_as, wrap_dek_for_as};
 
 /// Length of the X-Wing encapsulation (public) key: ML-KEM-768 key (1184) + X25519 key (32).
 pub const SHARE_KEM_PUBLIC_LEN: usize = 1216;
@@ -199,8 +204,8 @@ pub const SHARE_SIG_PUBLIC_LEN: usize = 1312;
 /// Length of an ML-DSA-44 signature (FIPS 204).
 pub const SHARE_SELF_SIG_LEN: usize = 2420;
 
-/// Width of each reserved counter in the bundle — `derivation_index` and `key_epoch`, both
-/// big-endian `u32` and both always zero today (NCF-3 §5.2a).
+/// Width of each counter in the bundle — `derivation_index` (the identity's number, §5.9) and
+/// `key_epoch` (always zero today, §5.2a), both big-endian `u32`.
 const COUNTER_LEN: usize = 4;
 
 /// The identity layout version this build writes, and the only one it will parse.
@@ -401,8 +406,8 @@ impl From<WrapError> for ShareError {
 /// it identifies an account only to someone already given the address.
 #[derive(Clone)]
 pub struct SharePublicKey {
-    kem: EncapsulationKey,
-    auth: x25519_dalek::PublicKey,
+    pub(crate) kem: EncapsulationKey,
+    pub(crate) auth: x25519_dalek::PublicKey,
     /// The exact published bytes, kept so the fingerprint is over what was actually transmitted
     /// rather than over a re-encoding of it.
     raw: [u8; SHARE_PUBLIC_LEN],
@@ -480,7 +485,7 @@ impl SharePublicKey {
         self.raw[OFF_VERSION]
     }
 
-    /// The reserved derivation index — always 0 today, and part of the fingerprinted root.
+    /// The identity's number (NCF-3 §5.9) — 0 for the first, and part of the fingerprinted root.
     pub fn derivation_index(&self) -> u32 {
         read_u32(&self.raw, OFF_DERIVATION_INDEX)
     }
@@ -630,12 +635,14 @@ fn is_low_order_x25519(pk: &[u8]) -> bool {
 /// Generate the account's share keypair from its 32-byte KEM seed.
 ///
 /// Deterministic: the same seed always yields the same keypair, on any device, forever.
-fn keypair(share_kem_seed: &[u8; SHARE_KEM_SEED_LEN]) -> DecapsulationKey {
+pub(crate) fn keypair(share_kem_seed: &[u8; SHARE_KEM_SEED_LEN]) -> DecapsulationKey {
     DecapsulationKey::from(*share_kem_seed)
 }
 
 /// The account's static X25519 sender-authentication keypair.
-fn auth_keypair(share_auth_secret: &[u8; SHARE_AUTH_SECRET_LEN]) -> x25519_dalek::StaticSecret {
+pub(crate) fn auth_keypair(
+    share_auth_secret: &[u8; SHARE_AUTH_SECRET_LEN],
+) -> x25519_dalek::StaticSecret {
     x25519_dalek::StaticSecret::from(*share_auth_secret)
 }
 
@@ -654,7 +661,7 @@ fn sig_keypair(share_sig_seed: &[u8; SHARE_SIG_SEED_LEN]) -> ExpandedSigningKey<
 ///
 /// This is the cheap half of building an identity — a key generation and no signature — and it is
 /// all that is needed to know an account's own address or to bind a wrapping key to a recipient.
-fn identity_root(
+pub(crate) fn identity_root(
     share_sig_seed: &[u8; SHARE_SIG_SEED_LEN],
     derivation_index: u32,
 ) -> [u8; SHARE_ROOT_LEN] {
@@ -667,9 +674,9 @@ fn identity_root(
 
 /// Derive the published share identity from the account's three secrets (NCF-3 §5.1).
 ///
-/// `derivation_index` and `key_epoch` are written as zero and there is no production way to write
-/// anything else: both are reserved space, and publishing a non-zero value needs a replacement
-/// flow that does not exist yet.
+/// This is identity 0, written with `derivation_index` and `key_epoch` zero. A numbered identity
+/// is [`public_key_at`] (§5.9); `key_epoch` has no production way to be non-zero, because
+/// publishing one needs a replacement flow that does not exist yet.
 pub fn public_key(
     share_kem_seed: &[u8; SHARE_KEM_SEED_LEN],
     share_auth_secret: &[u8; SHARE_AUTH_SECRET_LEN],
@@ -678,8 +685,8 @@ pub fn public_key(
     public_key_inner(share_kem_seed, share_auth_secret, share_sig_seed, 0, 0)
 }
 
-/// The single body behind [`public_key`] and its counters-supplying twin below.
-fn public_key_inner(
+/// The single body behind [`public_key`], [`public_key_at`] and the counters-supplying twin below.
+pub(crate) fn public_key_inner(
     share_kem_seed: &[u8; SHARE_KEM_SEED_LEN],
     share_auth_secret: &[u8; SHARE_AUTH_SECRET_LEN],
     share_sig_seed: &[u8; SHARE_SIG_SEED_LEN],
@@ -712,7 +719,7 @@ fn public_key_inner(
 ///
 /// It exists to prove the property the reserved space was bought for: a bundle with a bumped
 /// `key_epoch` is a different published identity with a **different signature** and **the same
-/// address**, because the epoch is outside the root. Production cannot express a non-zero value,
+/// address**, because the epoch is outside the root. Production cannot express a non-zero epoch,
 /// and must not until a replacement flow is specified — a second bundle for one address is a
 /// question about which one is current, and this format does not answer it (NCF-3 §5.2a).
 #[cfg(any(test, feature = "vectors"))]
@@ -808,7 +815,7 @@ pub fn verify_address(key: &SharePublicKey, address: &ShareAddress) -> Result<()
 /// bound through `kem_ciphertext` here and through ML-KEM's own derivation, the EXACT
 /// authentication key is bound through `ss_auth`, and both were verified against the root before
 /// any of this ran.
-fn wrap_key(
+pub(crate) fn wrap_key(
     ss_kem: &[u8; 32],
     ss_auth: &[u8; 32],
     sender_address: &ShareAddress,
@@ -853,6 +860,9 @@ fn wrap_key(
 /// POSTed. It is bound into the wrapping key, so an envelope stored next to different columns
 /// stops opening (defect A6) — which also means the name and digest have to be sealed BEFORE this
 /// is called, not after.
+///
+/// This sends as identity 0: it is [`wrap_dek_for_as`] at sender index 0, which is where the
+/// randomness is drawn.
 pub fn wrap_dek_for(
     sender_auth_secret: &[u8; SHARE_AUTH_SECRET_LEN],
     sender_sig_seed: &[u8; SHARE_SIG_SEED_LEN],
@@ -861,28 +871,14 @@ pub fn wrap_dek_for(
     dek: &[u8; DEK_LEN],
     payload: &SharePayload<'_>,
 ) -> Result<Vec<u8>, ShareError> {
-    // Both random values come from THIS crate's single audited CSPRNG seam (`rng::OsRng`, which is
-    // `crypto.getRandomValues` in the browser build) rather than from the KEM crate's own rand
-    // plumbing, which speaks a different `rand_core` generation. One randomness source for the
-    // whole crate is an invariant worth more than the convenience — see `rng.rs`.
-    //
-    // ⚠ An envelope has TWO independent random inputs, not one: the KEM's 64-byte `eseed` and the
-    // 24-byte nonce of the sealed-DEK envelope. Fixing only the first leaves the last 104 bytes
-    // unreproducible, which is why the vectors-only twin below takes both. Reusing either even
-    // once would be catastrophic, so they are drawn here and never stored.
-    let kem_eseed = Zeroizing::new(crate::rng::OsRng::bytes::<KEM_RANDOMNESS_LEN>());
-    let envelope_nonce = crate::rng::OsRng::bytes::<{ wrap::ENVELOPE_NONCE_LEN }>();
-    wrap_dek_for_inner(
+    wrap_dek_for_as(
         sender_auth_secret,
         sender_sig_seed,
+        0,
         recipient,
         address,
         dek,
         payload,
-        &EnvelopeRandomness {
-            kem_eseed: &kem_eseed,
-            envelope_nonce: &envelope_nonce,
-        },
     )
 }
 
@@ -899,15 +895,17 @@ pub struct EnvelopeRandomness<'a> {
     pub envelope_nonce: &'a [u8; wrap::ENVELOPE_NONCE_LEN],
 }
 
-/// The single implementation behind [`wrap_dek_for`] and its vectors-only twin.
+/// The single implementation behind [`wrap_dek_for`], [`wrap_dek_for_as`] and their vectors-only
+/// twins.
 ///
 /// It exists so there is exactly ONE body: a separate deterministic copy could drift from the
 /// production path, and the committed vectors would then attest to a construction nothing ships.
-/// Both random inputs are parameters here — the caller above draws them, the vectors caller
+/// Both random inputs are parameters here — the production caller draws them, the vectors caller
 /// supplies them — which is the same split [`wrap::seal`] and `wrap::seal_with_nonce` use.
-fn wrap_dek_for_inner(
+pub(crate) fn wrap_dek_for_inner(
     sender_auth_secret: &[u8; SHARE_AUTH_SECRET_LEN],
     sender_sig_seed: &[u8; SHARE_SIG_SEED_LEN],
+    sender_index: u32,
     recipient: &SharePublicKey,
     address: &ShareAddress,
     dek: &[u8; DEK_LEN],
@@ -927,8 +925,8 @@ fn wrap_dek_for_inner(
 
     // The static-static half: only the holder of THIS account's auth secret can compute it, and
     // only the intended recipient can recompute it. That is what turns "an envelope for you" into
-    // "an envelope for you, from me".
-    let sender_address = address_for(sender_sig_seed);
+    // "an envelope for you, from me". The address is the one of the identity the sender sends AS.
+    let sender_address = address_of_root(&identity_root(sender_sig_seed, sender_index));
     let ss_auth = Zeroizing::new(
         auth_keypair(sender_auth_secret)
             .diffie_hellman(&recipient.auth)
@@ -982,6 +980,8 @@ pub fn claimed_sender(envelope: &[u8]) -> Result<ShareAddress, ShareError> {
 /// no branch that retries with a different construction: ML-KEM answers a bad ciphertext with a
 /// random-looking secret rather than an error, so the only correct response to "it did not open"
 /// is to stop.
+///
+/// This opens as identity 0: it is [`unwrap_dek_as`] at index 0, which is where the body lives.
 pub fn unwrap_dek(
     share_kem_seed: &[u8; SHARE_KEM_SEED_LEN],
     share_auth_secret: &[u8; SHARE_AUTH_SECRET_LEN],
@@ -990,63 +990,15 @@ pub fn unwrap_dek(
     envelope: &[u8],
     payload: &SharePayload<'_>,
 ) -> Result<Zeroizing<[u8; DEK_LEN]>, ShareError> {
-    if envelope.len() != SHARE_ENVELOPE_LEN {
-        return Err(ShareError::BadEnvelopeLength);
-    }
-    // Built from the columns the caller was served. A row whose name, digest or item id is not
-    // the one the sender wrapped derives a different key and does not open (defect A6).
-    let payload_commitment = payload.commitment()?;
-    // The claimed sender address must belong to the identity the caller fetched for it. Without
-    // this, a caller could be handed any identity and the agreement below would be computed
-    // against a key that has nothing to do with the name shown to the person.
-    let claimed = claimed_sender(envelope)?;
-    verify_address(sender, &claimed)?;
-
-    let (_, rest) = envelope.split_at(SHARE_ADDRESS_LEN);
-    let (ct_bytes, sealed) = rest.split_at(KEM_CIPHERTEXT_LEN);
-    let ct_bytes: [u8; KEM_CIPHERTEXT_LEN] = ct_bytes
-        .try_into()
-        .expect("split at KEM_CIPHERTEXT_LEN yields exactly 1120 bytes");
-
-    let sk = keypair(share_kem_seed);
-    // Our own root, recomputed here rather than fetched: the sender bound the wrapping key to what
-    // the ADDRESS pins, so the recipient can rebuild the exact same bytes from the account code
-    // without knowing which version of its bundle the sender had. That is what the narrowing in
-    // `wrap_key` bought.
-    let our_root = identity_root(share_sig_seed, 0);
-    let ct: &Ciphertext = (&ct_bytes).into();
-    let ss = sk.decapsulate(ct);
-    let mut ss_kem = Zeroizing::new([0u8; 32]);
-    ss_kem.copy_from_slice(&ss[..]);
-
-    let ss_auth = Zeroizing::new(
-        auth_keypair(share_auth_secret)
-            .diffie_hellman(&sender.auth)
-            .to_bytes(),
-    );
-
-    let key = wrap_key(
-        &ss_kem,
-        &ss_auth,
-        &claimed,
-        &ct_bytes,
-        &our_root,
-        &payload_commitment,
-    );
-
-    // ⚠ THE SENDER CHECK AND THE PAYLOAD CHECK ARE THIS LINE. There is no separate "is the sender
-    // genuine?" or "does this row belong to this envelope?" step: a wrong sender yields a
-    // different `ss_auth` and a swapped column yields a different commitment, either of which
-    // changes the wrapping key and stops the envelope opening. So "it opened", "the claimed
-    // sender really sent it" and "these are the columns they sent it with" are one fact, and no
-    // caller can take one without the others.
-    let pt = Zeroizing::new(wrap::open(&key, AAD_SHARE_WRAP, sealed)?);
-    if pt.len() != DEK_LEN {
-        return Err(ShareError::Auth);
-    }
-    let mut dek = Zeroizing::new([0u8; DEK_LEN]);
-    dek.copy_from_slice(&pt);
-    Ok(dek)
+    unwrap_dek_as(
+        share_kem_seed,
+        share_auth_secret,
+        share_sig_seed,
+        0,
+        sender,
+        envelope,
+        payload,
+    )
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1081,6 +1033,7 @@ pub fn wrap_dek_for_with_randomness(
     wrap_dek_for_inner(
         sender_auth_secret,
         sender_sig_seed,
+        0,
         recipient,
         address,
         dek,
@@ -1264,22 +1217,19 @@ mod tests {
 
         // One flipped bit anywhere in the signed prefix, and anywhere in the signature itself.
         for at in [
-            OFF_VERSION + 1,        // derivation index
-            OFF_PK_SIG,             // the verification key
-            OFF_KEY_EPOCH,          // the reserved epoch
-            OFF_PK_KEM,             // the KEM key
-            OFF_PK_AUTH,            // the authentication key
-            OFF_SELF_SIG,           // the signature's first byte
-            SHARE_PUBLIC_LEN - 1,   // and its last
+            OFF_VERSION + 1,      // derivation index
+            OFF_PK_SIG,           // the verification key
+            OFF_KEY_EPOCH,        // the reserved epoch
+            OFF_PK_KEM,           // the KEM key
+            OFF_PK_AUTH,          // the authentication key
+            OFF_SELF_SIG,         // the signature's first byte
+            SHARE_PUBLIC_LEN - 1, // and its last
         ] {
             let mut bad = good;
             bad[at] ^= 0x01;
             let err = SharePublicKey::from_bytes(&bad).unwrap_err();
             assert!(
-                matches!(
-                    err,
-                    ShareError::BadSelfSignature | ShareError::BadPublicKey
-                ),
+                matches!(err, ShareError::BadSelfSignature | ShareError::BadPublicKey),
                 "flipping byte {at} must not yield a usable identity, got {err:?}",
             );
         }
@@ -1287,7 +1237,8 @@ mod tests {
         // The whole working half swapped for another account's — the substitution the signature
         // exists to catch. Both keys are individually valid; what is missing is authorisation.
         let mut swapped = good;
-        swapped[OFF_PK_KEM..OFF_SELF_SIG].copy_from_slice(&id_b().to_bytes()[OFF_PK_KEM..OFF_SELF_SIG]);
+        swapped[OFF_PK_KEM..OFF_SELF_SIG]
+            .copy_from_slice(&id_b().to_bytes()[OFF_PK_KEM..OFF_SELF_SIG]);
         assert_eq!(
             SharePublicKey::from_bytes(&swapped).unwrap_err(),
             ShareError::BadSelfSignature,
@@ -1411,11 +1362,9 @@ mod tests {
         // is actually a valid signature rather than two implementations sharing one bug.
         let their_vk = fips204::ml_dsa_44::PublicKey::try_from_bytes(their_vk_bytes)
             .expect("verification key round-trips");
-        let our_sig_bytes: &[u8; SHARE_SELF_SIG_LEN] =
-            our_sig[..].try_into().expect("2420 bytes");
+        let our_sig_bytes: &[u8; SHARE_SELF_SIG_LEN] = our_sig[..].try_into().expect("2420 bytes");
         assert!(their_vk.verify(message, our_sig_bytes, SIG_CTX_IDENTITY_BUNDLE));
-        let encoded: &EncodedSignature<MlDsa44> =
-            their_sig[..].try_into().expect("2420 bytes");
+        let encoded: &EncodedSignature<MlDsa44> = their_sig[..].try_into().expect("2420 bytes");
         assert!(ours.verifying_key().verify_with_context(
             message,
             SIG_CTX_IDENTITY_BUNDLE,
@@ -1448,7 +1397,10 @@ mod tests {
     fn identity_is_deterministic_from_the_secrets() {
         // A recipient re-entering their account code on a new device must land on the same
         // address, or every share they ever published stops arriving.
-        assert_eq!(id_a().to_bytes(), public_key(&KEM_A, &AUTH_A, &SIG_A).to_bytes());
+        assert_eq!(
+            id_a().to_bytes(),
+            public_key(&KEM_A, &AUTH_A, &SIG_A).to_bytes()
+        );
         assert_eq!(address_for(&SIG_A), address_for(&SIG_A));
         assert_ne!(address_for(&SIG_A), address_for(&SIG_B));
         assert_eq!(id_a().to_bytes().len(), SHARE_PUBLIC_LEN);

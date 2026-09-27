@@ -85,6 +85,8 @@ pub mod opener;
 pub mod phrase;
 pub mod rng;
 pub mod share;
+// Numbered share identities (§5.9). Private: every item is re-exported from `share`.
+mod share_at;
 pub mod wrap;
 
 // Convenience re-exports of the most-used types (module paths remain canonical in docs).

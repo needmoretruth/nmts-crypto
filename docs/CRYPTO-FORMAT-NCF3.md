@@ -394,9 +394,11 @@ against this section; adding a separator without adding the row fails that test.
 | `nmts/v3/auth-secret` | 32 | Login proof, sent to the server |
 | `nmts/v3/data-key` | 32 | Wraps DEKs; seals names, metadata, content hashes |
 | `nmts/v3/file-list-key` | 32 | Opens the sealed file list, nothing else |
-| `nmts/v3/share-kem` | 32 | X-Wing decapsulation-key seed (§5.1) |
-| `nmts/v3/share-auth` | 32 | X25519 sender-authentication scalar (§5.5) |
-| `nmts/v3/share-sig` | 32 | ML-DSA-44 signing-key seed ξ for the identity self-signature (§5.1, §5.2a) |
+| `nmts/v3/share-kem` | 32 | X-Wing decapsulation-key seed (§5.1) — expanded from `PRK` for identity 0 and from `R(N)` for identity `N` (§5.9) |
+| `nmts/v3/share-auth` | 32 | X25519 sender-authentication scalar (§5.5) — same two roots |
+| `nmts/v3/share-sig` | 32 | ML-DSA-44 signing-key seed ξ for the identity self-signature (§5.1, §5.2a) — same two roots |
+| `nmts/v3/share-id-root` | 32 | `shareIdRoot`, the parent of every numbered identity `N ≥ 1` (§5.9, added 2026-09-23) |
+| `nmts/v3/share-id/<N>` | 32 | `R(N)`, the root of numbered identity `N ≥ 1`, expanded from `shareIdRoot` (§5.9). Index 0 has no row here: its root is `PRK` itself |
 | `nmts/v3/wallet-root` | 32 | Parent of every wallet seed |
 | `nmts/v3/wallet/<N>` | 32 | Wallet `N`, expanded from `walletRoot` (§1.3) |
 | `nmts/v3/evm-wallet/<N>` | **48** | EVM wallet `N`'s seed, expanded from `walletRoot` (§1.9, added 2026-09-23) and reduced to a secp256k1 key by FIPS 186-5 A.2.1. Forty-eight bytes, not thirty-two: the extra 128 bits are what make the reduction's bias negligible |
@@ -684,7 +686,7 @@ pk_sig   = ML-DSA-44 verification key                                  = 1312 by
 
 offset  size   field
      0     1   identity_version = 0x01     ← OUTSIDE the fingerprint; fixed offset forever
-     1     4   derivation_index (u32 BE)   ← reserved for multiple public codes; always 0 today
+     1     4   derivation_index (u32 BE)   ← the identity's number (§5.9); 0 for the first
      5  1312   pk_sig
   1317     4   key_epoch (u32 BE)          ← reserved for key replacement; always 0 today
   1321  1216   pk_kem
@@ -787,12 +789,10 @@ anchor is lattice-based on purpose, so it survives the adversary that breaks the
 Everything else can now change under a frozen format and an unchanged address: replacing `pk_kem`
 or `pk_auth` is a `key_epoch` bump re-signed by the same root (value agility), and a future body
 layout — a new key *type*, §17-style derived identities — is a new `identity_version` under the
-same root (structural agility). ⚠ **Neither procedure is implemented today**: `key_epoch` and
-`derivation_index` are always 0, the server stores one bundle per account, and a replacement flow
-must be specified before any non-zero value is ever published. The reserved label family
-`nmts/v3/share-id/<N>` (per-index sub-roots, shaped like `nmts/v3/wallet/<N>`) is named here so a
-future revision does not improvise it — it is deliberately **not** in the §2 table, because the
-registry test refuses phantom labels and index 0 keeps today's three labels bit-for-bit.
+same root (structural agility). ⚠ **`key_epoch` has no procedure and is always 0** — §5.9 says
+why none is needed for replacing a code. **`derivation_index` has one since 2026-09-23**: §5.9
+numbers an account's identities under the label family `nmts/v3/share-id/<N>` this paragraph
+reserved, shaped like `nmts/v3/wallet/<N>`, and index 0 keeps its three labels bit for bit.
 
 ⚠ **What it does not buy: freshness.** The signature proves a bundle is genuine, not that it is the
 *latest* — a server can keep serving a stale signed bundle after a future epoch bump (same shape as
@@ -1110,8 +1110,11 @@ it names:
    (`sender` 4989, `envelope` 1240, `hash` 104, `name` and `parts` as above) → *damaged*.
 8. `sender` does not parse under §5.2a, or `verify_address(sender, envelope[0..16])` fails →
    *damaged*.
-9. `unwrap_dek` with `payload_cmt` over `item`, `name`, `hash` fails → *not for this key* (made for
-   another key, or changed after it was made — deliberately indistinguishable, §5.5).
+9. `unwrap_dek` with `payload_cmt` over `item`, `name`, `hash` fails under every identity the
+   reader's key holds → *not for this key* (made for another key, or changed after it was made —
+   deliberately indistinguishable, §5.5). The file does not name the recipient's identity (§5.9), so
+   a reader tries its own: live ones in ascending number, then revoked ones, the most recently
+   revoked first, and takes the first that opens.
 10. `name` does not open, or is not the name document above, or its `network` is not the file's, or
     its `parts_sha256` is not SHA-256 of `parts` → *damaged*.
 11. `parts` does not open, or is not the parts document above → *damaged*.
@@ -1161,12 +1164,14 @@ file is secret. The default file name is `nmts-public-code-<public code>.nmtscod
 * **The file proves only itself.** Whoever writes it chooses both `code` and `identity`, so a
   reader that accepts it knows the two agree, not that they belong to the intended recipient. It
   authenticates nothing unless the sender compares `code` with the code the recipient gave them
-  some other way. A sender who has both a code she was told and a file must use the code as the
+  some other way. A sender who has both a code they were told and a file must use the code as the
   check: the reference program refuses to make a handover when they differ.
-* **A file pins one identity.** `identity` carries its `key_epoch` (§5.1). Once public codes can be
-  replaced, a file made before the replacement keeps sealing to the old identity; the replacement
-  procedure, when it is specified, has to say whether a handover sealed to a replaced identity is
-  still opened or is refused.
+* **A file pins one identity.** `identity` carries its `derivation_index` and `key_epoch` (§5.1). A
+  public code is replaced by publishing a new numbered identity and revoking the old one (§5.9); a
+  file made before that keeps sealing to the old identity, and a handover sealed to it still opens,
+  because the recipient's reader tries its revoked identities too (§5.6 step 9). Whether the
+  identity has been revoked is not in the file: the server answers that, since revocation is
+  outside this format (§5.9).
 
 ### 5.8 The public link (added 2026-09-26)
 
@@ -1179,14 +1184,17 @@ secret  = S: 32 bytes from the uploader's CSPRNG, one per link, unpadded base64u
 
 stored beside the token — all four made in the uploader's browser:
   wrapped      = E(S,       "nmts/v3/link-wrap",          DEK)             104 bytes
-  name         = E(DEK,     "nmts/v3/share-name",         name document)   §5.4 — absent when the link hides the name
+  name         = E(DEK,     "nmts/v3/share-name",         name document)   §5.4 — always present
   hash         = E(DEK,     "nmts/v3/share-content-hash", SHA-256)         104 bytes, §5.4
   owner_secret = E(dataKey, "nmts/v3/link-secret",        S)               104 bytes — the uploader's copy
 ```
 
 **Nothing else is newly constructed.** `E` is the §3 envelope. `name` and `hash` are the §5.4
 re-seals under the file DEK, and the name document is the §5.4 share document
-(`{"f":"nmts-share-file/1","name":…,"size":…}`). The two new objects are the DEK wrapped under
+(`{"f":"nmts-share-file/1","name":…,"size":…}`). A link that hides the name seals the same
+document without the `name` field — `size`, and `mime` when there is one — because the reader needs
+the real length to take any size padding off. The server keeps a flag saying which of the two was
+chosen and cannot check it. The two new objects are the DEK wrapped under
 `S` and `S` sealed under the uploader's `dataKey`, each with its own AAD (`nmts/v3/link-wrap`,
 `nmts/v3/link-secret`, §2.2). Like §2.5 and §5.6, these are new names for new objects and not
 NCF-4: no existing key, envelope or address changes value.
@@ -1218,8 +1226,9 @@ authentication under the DEK (§4) or the digest check.
 2. Ask the server for the token: unknown → *no such link*; cut or expired → *link cut*.
 3. `unwrap_dek_from_link(S, wrapped)` fails → *damaged link*. A wrong secret and a changed envelope
    are deliberately indistinguishable (§3.2).
-4. If `name` is present, open it under the DEK with `nmts/v3/share-name` and read the share document
-   as §5.4 readers do.
+4. Open `name` under the DEK with `nmts/v3/share-name` and read the share document as §5.4 readers
+   do. A document without `name` is a link that hides the name; one without an integer `size` →
+   *damaged link*.
 5. Fetch the pieces and open each stream under the DEK, checking its position against its own
    header (§4.1).
 6. Open `hash` under the DEK with `nmts/v3/share-content-hash`, take padding off with the document's
@@ -1232,11 +1241,112 @@ A link password is not part of this version; when it comes it is a new object wi
   who is sent it in a report. Cutting the link stops the server from serving the piece list. It does
   not reach copies already downloaded or piece ids already learned, and a piece stays on the network
   until its storage ends or is destroyed.
-* **A link that hides the name also hides the real length.** The length lives only in the name
-  document. For a file stored with size padding, a reader without that document cannot take the
-  padding off, and step 6 refuses the download.
-* The lengths are not padded: the length of `name` gives the length of the file name.
+* **Hiding the name does not hide the real length.** The name document is still sealed and still
+  carries `size`; only the `name` field is left out. Whoever opens the link learns the length.
+* The lengths are not padded: the length of `name` gives the length of the file name, and a link
+  that hides the name is told apart from one that shows it by that length.
 * The fragment stays in the browser history of whoever opened the link.
+
+### 5.9 Numbered identities — more than one public code per key (added 2026-09-23)
+
+An account may publish more than one identity. Each is numbered by the `derivation_index` field
+§5.1 reserved for exactly this, and each has its own keys, its own root and therefore its own
+address. Identity 0 is the one every account already has; identities 1, 2, 3… hang off one
+sub-root per number, the family §5.2a named in advance, and every sub-root hangs off one parent —
+the shape of `walletRoot` and `wallet/<N>` in §1.3.
+
+```text
+shareIdRoot        = HKDF-Expand(PRK, "nmts/v3/share-id-root", 32)         // parent of every N ≥ 1
+R(0)               = PRK                                                  // §1.2 — identity 0, unchanged
+R(N)               = HKDF-Expand(shareIdRoot, "nmts/v3/share-id/" || dec(N), 32)   // for every N ≥ 1
+shareKemSeed(N)    = HKDF-Expand(R(N), "nmts/v3/share-kem",  32)
+shareAuthSecret(N) = HKDF-Expand(R(N), "nmts/v3/share-auth", 32)
+shareSigSeed(N)    = HKDF-Expand(R(N), "nmts/v3/share-sig",  32)
+identity(N)        = the §5.1 bundle from those three seeds, derivation_index = N, key_epoch = 0
+address(N)         = §5.2 over root(N) = u32be(N) || pk_sig(N)
+```
+
+`dec(N)` is `N` in decimal ASCII with no padding, exactly as in §1.3; `N` fits in the bundle's
+`u32`. **Numbered from 1**, and index 0 is refused by the sub-root function rather than answered:
+identity 0 already exists under `R(0) = PRK`, and a second road to "identity 0" would be a second
+value for one published address.
+
+**Why a parent, and not each `R(N)` straight off `PRK`.** A browser does not keep `PRK` after
+sign-in; it keeps the roots it will need later (`walletRoot`, `aiAccountRoot`) and forgets the
+rest. A person makes a new public code whenever they like, long after the NMTS key was typed, and
+the numbers grow past three as codes are revoked, so they cannot all be computed in advance.
+Keeping `shareIdRoot` is what lets the next number be made without asking for the key again.
+Holding it grants every numbered identity from 1 up and nothing else: not identity 0 (whose
+seeds come from `PRK`), not `dataKey`, not a wallet.
+
+**Why identity 0 has no sub-root of its own.** It has been published by every account since the
+mainnet cutover, and §5 froze it. Taking `PRK` as its root is what keeps it bit for bit what it is;
+the conformance vectors check it against the seeds and identities `ncf3.json` pins, not against a
+re-derivation of itself.
+
+**Why the same three labels under a different root, rather than three new labels per number.**
+The labels already say what the 32 bytes are for — the X-Wing seed, the authentication scalar and
+the ML-DSA seed of an identity — and the root says whose. It is the rule §1.5 uses for the
+child accounts a key derives, where a child runs the whole of §1.2 from its own input. One rule at every number means
+no per-index special case, and the registry keeps one row per purpose. Holding `R(N)` grants
+identity `N` and nothing else: it computes neither `shareIdRoot` nor another number's root,
+because HKDF-Expand is one-way — the same property §1.3 gives each wallet.
+
+**The number is inside the root, and that is deliberate.** Two numbers already differ by their
+signing keys; the index in the root also lets a reader of a bundle see which number it is. ⛔ It is
+a label chosen by whoever holds the key, and it proves nothing: a verifier reads it, a server orders
+by it, and nobody treats it as evidence of anything.
+
+**Nothing else in §5 changes.** An envelope's `sender_address` is the address of the identity the
+sender sends as; `root_recipient` is the root of the identity the sender addressed. The wrap, the
+row binding and the sender check are §5.3 and §5.5 unchanged, applied to whichever identity is in
+play.
+
+**Opening: the recipient must use the identity the envelope was sealed to.** An envelope does not
+name its recipient, and that is not new. The built-in inbox knows which address a share was
+stored against, so the recipient opens with that number. A carrier that does not say — the
+handover file (§5.6), sealed by a sender who may hold an older public key file (§5.7) — is opened
+by trying the account's identities in turn, live ones first. Each try is an ordinary §5.3 unwrap
+under a key the account owns, so trying never weakens anything; a wrong number fails exactly like
+any other refusal, and a caller cannot tell which of its numbers was close. The cost is one
+identity derivation and one unwrap per number tried.
+
+⛔ **This is an ADDITION, not NCF-4**, by the test §2.5 applied on 2026-08-17 and again for §1.5
+and §1.7: no existing key, envelope, address or code changes value — identity 0 is `R(0) = PRK` and
+the vectors pin it against the frozen bytes; no reader of existing data behaves differently — the
+§5.2a order never refused a non-zero `derivation_index`, it verifies whatever the root says; and
+the version byte means what it meant before. What is taken is one label and one label family,
+both recorded in §2.1.
+A change to identity 0's derivation, to the bundle layout, or to the envelope would still require
+NCF-4.
+
+**Revoking a number is not in this format.** Which identities an account has published, which it
+has revoked, and what a server answers for a revoked address are service state, specified by the
+service rather than here. Two things were weighed and left out on purpose:
+
+* **A signed revocation statement** (PGP's revocation certificate). What it would add is that a
+  server cannot fake a revocation — but a server that wants a code dead can already refuse to serve
+  it (§9, availability), and a server that wants a revocation hidden can still keep serving the
+  bundle (§9, freshness); a statement helps only a reader who receives it by another road, and the
+  product has no such road. It can be added later without touching any identity: the anchor it
+  would be signed under is the lattice key already in every root.
+* **`key_epoch`.** It stays 0. Replacing an identity's KEM or authentication key under the same
+  address cannot shut out a key holder, because every epoch's seeds would come from the same
+  `PRK`. What a person needs when a code must stop being theirs is a different address, and that
+  is a new number. The epoch's one remaining use is replacing an algorithm, which comes with a new
+  `identity_version` and is specified with it.
+
+⚠ **Limits.**
+1. **A key holder derives every number.** Whoever holds the NMTS key holds identity 0, 1, 2 … and
+   every one of them opens whatever was sealed to it. Revoking a number ends its use through NMTS
+   and tells others it was revoked; it does not take anything away from somebody who already holds
+   the key. The use of more than one number is keeping circles apart — a code for one group of
+   people, another for everyone else, and retiring the one that reached the wrong hands.
+2. **Numbers are linkable by the account's owner and by the server, not by anyone else.** The
+   server stores which account published which address. To an outsider two addresses of one
+   account are two unrelated 128-bit values; the bundles share nothing but the version byte.
+3. **Revocation is server state**, so it has the freshness limit of §9: a server can keep answering
+   for a revoked address as if it were live.
 
 ---
 
@@ -1525,7 +1635,6 @@ gains, all with fixed inputs and committed expected bytes:
    unknown key, and not a handover at all. Beside them, the recipient's public code file and one
    whose identity is another code's. The crate regenerates and opens it; the browser's reader and
    the command-line tool's reader are both held to it.
-
 11. **EVM wallets** (§1.9, 2026-09-23) — in their own fixture, `crypto/tests/vectors/ncf3-evm.json`,
    written by an independent implementation (`web/scripts/gen-evm-vectors.mjs`: `@noble/hashes` for
    HKDF-Expand and Keccak-256, `@noble/curves`' `mapHashToField` for the reduction, and every address
@@ -1543,6 +1652,16 @@ gains, all with fixed inputs and committed expected bytes:
    more for `owner_secret`: another account's `dataKey`, and `S` under the right `dataKey` with the
    `dek-wrap` label. The crate regenerates and opens it.
 
+13. **Numbered identities** (§5.9, 2026-09-23) — in their own fixture,
+   `crypto/tests/vectors/ncf3-identities.json`, so that `ncf3.json` stays untouched. For one
+   account code of the derivation group: identity 0 by the numbered path, its three seeds compared
+   byte for byte with the seeds `ncf3.json` pins for that code, and the bundle builder at index 0
+   compared with every identity the `address` group pins; `shareIdRoot`, then `R(N)`, the three
+   seeds, `root_hex`, the address and its display form, and the identity's SHA-256 for
+   `N = 1, 2, 10`, with identity 1's 4,989 bytes in full; the refusal of `N = 0` by the sub-root
+   function; and a wrap to identity 1 at fixed randomness that opens with identity 1's secrets and
+   is refused, identically to any other refusal, with identity 0's and identity 2's.
+
 Vectors are generated by the `vectors` cargo feature, which is the only thing in the crate that may
 supply a nonce; production constructors never accept one.
 
@@ -1557,7 +1676,7 @@ supply a nonce; production constructors never accept one.
 | **The account code's length and display form** | No defect asks for it; what a person types is a product decision |
 | **4 MiB chunks** | Ranged reads and memory ceilings were sized around it; no defect touches it |
 | **Server never holds a key** | The product's reason to exist |
-| **Share addresses immutable once published** | Still true — the address pins the identity *root*. What changed 2026-08-02: the rest of the bundle is bound by the self-signature instead of the fingerprint, so it *can* be re-published under the same address once a replacement flow is specified (§5.2a) |
+| **Share addresses immutable once published** | Still true — the address pins the identity *root*. What changed 2026-08-02: the rest of the bundle is bound by the self-signature instead of the fingerprint, so it *can* be re-published under the same address once a replacement flow is specified (§5.2a). What changed 2026-09-23: an account may publish more than one identity, each under its own number and its own address (§5.9) — every one of them immutable once published |
 | **No file version history** | Decided 2026-07-26 — storage is paid from the user's wallet |
 
 ---

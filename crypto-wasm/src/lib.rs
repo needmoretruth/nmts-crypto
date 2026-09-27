@@ -11,7 +11,7 @@
 //!
 //! Byte layouts crossing the boundary — the authority is `docs/CRYPTO-FORMAT-NCF3.md`, and every
 //! number below is repeated in code as a named constant rather than a literal:
-//! * `kdf_derive` returns **288 bytes**; the field-by-field layout is on that function, which is
+//! * `kdf_derive` returns **320 bytes**; the field-by-field layout is on that function, which is
 //!   the one place it is written down. NCF-3 replaced NCF-1/NCF-2 outright, so this is not an
 //!   additive tail on an older buffer — reading it by any older offset table yields the wrong
 //!   secret, silently. Everything except `account_id` and `share_address` must never leave the
@@ -55,28 +55,28 @@ use sha2::{Digest, Sha256};
 use wasm_bindgen::{prelude::*, JsError};
 
 // ⛔ SIBLING FILES BECAUSE THIS ONE HAS A CEILING (2026-09-20 · `check:size`), not because the
-//    surface is split: `convert` holds the JS-boundary helpers every export below calls; `openers`
-//    the NCF-3 §1.7 exports, `codes` the account-code and phrase ones, `wallets` the Sui and EVM
-//    wallet keys (§1.4 · §1.9) and `links` the public link (§5.8). `#[wasm_bindgen]` exports by
-//    symbol, so a function's module changes neither its JavaScript name nor its shape.
+//    surface is split: `convert` holds the JS-boundary helpers, `openers` §1.7, `codes` the account
+//    code and phrase, `wallets` §1.4 · §1.9, `links` the public link (§5.8), `share_ids` the numbered
+//    identities (§5.9). Exports go by symbol, so a module never changes a JavaScript name or shape.
 pub mod codes;
 mod convert;
 pub mod links;
 pub mod openers;
+pub mod share_ids;
 pub mod wallets;
 
-use convert::{fixed, js_int_u32, js_int_u64, parse_header, u64_to_js};
+use convert::{canonical_item_id, fixed, js_int_u32, js_int_u64, parse_header, u64_to_js};
 
 // ---------------------------------------------------------------------------------------
 // Key derivation (NCF-3 §1)
 // ---------------------------------------------------------------------------------------
 
 /// Total length of the [`kdf_derive`] output.
-pub const KDF_DERIVE_LEN: usize = 288;
+pub const KDF_DERIVE_LEN: usize = 320;
 
 /// Derives the account keys from the 20 raw account-code bytes (NCF-3 §1).
 ///
-/// Returns one concatenated buffer (`KDF_DERIVE_LEN` = 288 bytes) the caller slices:
+/// Returns one concatenated buffer (`KDF_DERIVE_LEN` = 320 bytes) the caller slices:
 /// ```text
 ///   0.. 16  account_id         public — the server's lookup key
 ///  16.. 48  auth_secret        secret — sent to the server over TLS at login
@@ -88,12 +88,13 @@ pub const KDF_DERIVE_LEN: usize = 288;
 /// 208..224  share_address      public — the address a user hands out to be shared with
 /// 224..256  share_sig_seed     secret — ML-DSA-44 seed; its key IS the identity root (§5.2a)
 /// 256..288  ai_account_root    secret — parent of every AI-account code (§1.5, the product rule of 2026-09-06)
+/// 288..320  share_id_root      secret — parent of share identities 1 and up (§5.9, 2026-09-23)
 /// ```
 /// Every secret region above must be retained inside the crypto worker and never cross the
 /// postMessage boundary.
 ///
-/// ⚠ **This layout only ever grows at the TAIL**, and `ai_account_root` was appended on 2026-09-06
-/// under the same rule. `share_sig_seed` was appended in 2026-08-02
+/// ⚠ **This layout only ever grows at the TAIL**: `ai_account_root` was appended on 2026-09-06 and
+/// `share_id_root` on 2026-09-23 under that rule. `share_sig_seed` was appended in 2026-08-02
 /// rather than filed beside the other two share secrets, where it would read better, because
 /// inserting it there would shift `wallet_root` and `share_address` and every constant on the
 /// JS side would be silently wrong about which 32 bytes it was holding. Readability loses to
@@ -117,6 +118,7 @@ pub fn kdf_derive(code_bytes: &[u8]) -> Result<Vec<u8>, JsError> {
     out.extend_from_slice(share::address_for(&keys.share_sig_seed).as_bytes());
     out.extend_from_slice(&keys.share_sig_seed[..]);
     out.extend_from_slice(&keys.ai_account_root[..]);
+    out.extend_from_slice(&keys.share_id_root[..]);
     debug_assert_eq!(out.len(), KDF_DERIVE_LEN);
     Ok(out)
 }
@@ -308,17 +310,6 @@ pub fn share_unwrap_dek(
     let dek = share::unwrap_dek(&kem, &auth, &sig, &sender, envelope, &payload)
         .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(dek[..].to_vec())
-}
-
-/// The item id as both sides must spell it before it is hashed into a share's payload commitment.
-///
-/// Lowercased, and nothing else. The sender takes the id from a drive listing and the recipient
-/// from an inbox row; both are the same UUID serialised by the same server, so they already agree
-/// — this exists so that a future difference in CASE alone cannot turn every share into "could not
-/// be opened", which is a failure no screen could explain. Any other difference SHOULD break the
-/// unwrap, because it means the two sides are not talking about the same file.
-fn canonical_item_id(item_id: &str) -> String {
-    item_id.to_ascii_lowercase()
 }
 
 /// The display form of a share address (`kdf_derive` bytes 208..224):

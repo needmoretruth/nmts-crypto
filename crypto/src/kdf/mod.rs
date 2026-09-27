@@ -19,11 +19,15 @@
 //! shareSigSeed = HKDF-Expand(PRK, "nmts/v3/share-sig",     32)   // ML-DSA-44 seed ξ    (§5.2a)
 //! walletRoot   = HKDF-Expand(PRK, "nmts/v3/wallet-root",   32)   // parent of every wallet
 //! aiAcctRoot   = HKDF-Expand(PRK, "nmts/v3/ai-account-root", 32) // parent of every AI account
+//! shareIdRoot  = HKDF-Expand(PRK, "nmts/v3/share-id-root", 32)  // parent of share identities 1..
 //!
 //! walletSeed(N) = HKDF-Expand(walletRoot, "nmts/v3/wallet/" || dec(N), 32)   // every N >= 0
 //! aiAccountCode(N)
 //!               = HKDF-Expand(aiAcctRoot, "nmts/v3/ai-account/" || dec(N), 20)  // every N >= 1
+//! R(N)          = HKDF-Expand(shareIdRoot, "nmts/v3/share-id/" || dec(N), 32)   // every N >= 1
+//!                 then the three share labels above under R(N) instead of PRK   (§5.9)
 //! ```
+//! The share seeds above are share identity 0 (`R(0) = PRK`); [`share_id`] numbers the rest.
 //! HKDF-Extract uses an empty salt (RFC 5869): identical to an all-zero salt, since HMAC
 //! zero-pads the key to the block size either way.
 //!
@@ -59,12 +63,14 @@
 //! # Layout
 //! * this module — the account-code chain.
 //! * [`ai_account`] — the sub-account codes an account expands (§1.5).
+//! * [`share_id`] — the numbered share identities an account expands (§5.9).
 //! * [`evm`] — the EVM wallets that pay for NMTS Heavy, off the same wallet root (§1.9).
 //! * [`device`] — the ONE derivation that does not start from an account code.
 
 pub mod ai_account;
 pub mod device;
 pub mod evm;
+pub mod share_id;
 
 pub use ai_account::{
     ai_account_code_from_root, AI_ACCOUNT_ROOT_LEN, INFO_AI_ACCOUNT_PREFIX, INFO_AI_ACCOUNT_ROOT,
@@ -76,6 +82,9 @@ pub use device::{
 pub use evm::{
     evm_address_checksummed, evm_address_of_key, evm_key_from_root, evm_key_from_seed,
     evm_seed_from_root, EVM_ADDRESS_LEN, EVM_KEY_LEN, EVM_SEED_LEN, INFO_EVM_WALLET_PREFIX,
+};
+pub use share_id::{
+    share_seeds_from_root, ShareSeeds, INFO_SHARE_ID_PREFIX, INFO_SHARE_ID_ROOT, SHARE_ID_ROOT_LEN,
 };
 
 use argon2::{Algorithm, Argon2, Block, Params, Version};
@@ -221,6 +230,11 @@ pub enum KdfError {
     /// code the parent can have minted — see [`INFO_AI_ACCOUNT_PREFIX`].
     #[error("ai-account index must be 1 or greater, got 0")]
     AiAccountIndexZero,
+    /// A share-identity index of 0 handed to the sub-root function. Identity 0 already exists
+    /// under `R(0) = PRK`, and a second road to it would be a second value for one published
+    /// address — see [`INFO_SHARE_ID_PREFIX`].
+    #[error("share-id index must be 1 or greater, got 0")]
+    ShareIdIndexZero,
 }
 
 /// Everything one account code produces, tagged with the KDF version that produced it.
@@ -253,6 +267,9 @@ pub struct DerivedKeys {
     pub wallet_root: Zeroizing<[u8; WALLET_SEED_LEN]>,
     /// Secret client-only root for every AI account (32 bytes) — see [`INFO_AI_ACCOUNT_ROOT`].
     pub ai_account_root: Zeroizing<[u8; AI_ACCOUNT_ROOT_LEN]>,
+    /// Secret client-only parent of share identities 1 and up (32 bytes) — see
+    /// [`INFO_SHARE_ID_ROOT`]. Not identity 0, whose seeds are the three fields above.
+    pub share_id_root: Zeroizing<[u8; SHARE_ID_ROOT_LEN]>,
 }
 
 impl DerivedKeys {
@@ -278,6 +295,23 @@ impl DerivedKeys {
     /// The account code of AI account number `index` (1-based), for this account.
     pub fn ai_account_code_for(&self, index: u32) -> Result<AccountCode, KdfError> {
         ai_account_code_from_root(&self.ai_account_root, index)
+    }
+
+    /// The three seeds of share identity number `index` (NCF-3 §5.9).
+    ///
+    /// Index 0 answers with copies of [`Self::share_kem_seed`], [`Self::share_auth_secret`] and
+    /// [`Self::share_sig_seed`] — identity 0's root is `PRK` itself, so it has no sub-root and is
+    /// never routed through [`share_seeds_from_root`], which refuses 0. Every `N >= 1` comes from
+    /// [`Self::share_id_root`].
+    pub fn share_seeds_for(&self, index: u32) -> ShareSeeds {
+        if index == 0 {
+            return ShareSeeds {
+                kem: self.share_kem_seed.clone(),
+                auth: self.share_auth_secret.clone(),
+                sig: self.share_sig_seed.clone(),
+            };
+        }
+        share_seeds_from_root(&self.share_id_root, index).expect("0 is answered above")
     }
 }
 
@@ -313,6 +347,7 @@ impl core::fmt::Debug for DerivedKeys {
             .field("share_sig_seed", &"<redacted>")
             .field("wallet_root", &"<redacted>")
             .field("ai_account_root", &"<redacted>")
+            .field("share_id_root", &"<redacted>")
             .finish()
     }
 }
@@ -377,6 +412,7 @@ pub fn derive_from_bytes(code_bytes: &[u8; ACCOUNT_CODE_BYTES]) -> Result<Derive
     let mut share_sig_seed = Zeroizing::new([0u8; SHARE_SIG_SEED_LEN]);
     let mut wallet_root = Zeroizing::new([0u8; WALLET_SEED_LEN]);
     let mut ai_account_root = Zeroizing::new([0u8; AI_ACCOUNT_ROOT_LEN]);
+    let mut share_id_root = Zeroizing::new([0u8; SHARE_ID_ROOT_LEN]);
 
     // Expand only fails if the requested length exceeds 255*HashLen (32 here) — impossible.
     hk.expand(INFO_ACCOUNT_ID, &mut account_id)
@@ -397,6 +433,8 @@ pub fn derive_from_bytes(code_bytes: &[u8; ACCOUNT_CODE_BYTES]) -> Result<Derive
         .expect("HKDF expand length within bounds");
     hk.expand(INFO_AI_ACCOUNT_ROOT, &mut *ai_account_root)
         .expect("HKDF expand length within bounds");
+    hk.expand(INFO_SHARE_ID_ROOT, &mut *share_id_root)
+        .expect("HKDF expand length within bounds");
 
     // `master` is zeroized when the `Zeroizing` wrapper drops at end of scope.
     Ok(DerivedKeys {
@@ -410,6 +448,7 @@ pub fn derive_from_bytes(code_bytes: &[u8; ACCOUNT_CODE_BYTES]) -> Result<Derive
         share_sig_seed,
         wallet_root,
         ai_account_root,
+        share_id_root,
     })
 }
 
@@ -427,7 +466,7 @@ mod tests {
         let code = [7u8; ACCOUNT_CODE_BYTES];
         let k = derive_from_bytes(&code).expect("derivation");
 
-        let outputs: [(&str, &[u8]); 9] = [
+        let outputs: [(&str, &[u8]); 10] = [
             ("account_id", &k.account_id),
             ("auth_secret", &k.auth_secret[..]),
             ("data_key", &k.data_key[..]),
@@ -437,6 +476,7 @@ mod tests {
             ("share_sig_seed", &k.share_sig_seed[..]),
             ("wallet_root", &k.wallet_root[..]),
             ("ai_account_root", &k.ai_account_root[..]),
+            ("share_id_root", &k.share_id_root[..]),
         ];
         for (i, (name_a, a)) in outputs.iter().enumerate() {
             for (name_b, b) in outputs.iter().skip(i + 1) {
