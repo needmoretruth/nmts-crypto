@@ -59,10 +59,12 @@
 //! # Layout
 //! * this module — the account-code chain.
 //! * [`ai_account`] — the sub-account codes an account expands (§1.5).
+//! * [`evm`] — the EVM wallets that pay for NMTS Heavy, off the same wallet root (§1.9).
 //! * [`device`] — the ONE derivation that does not start from an account code.
 
 pub mod ai_account;
 pub mod device;
+pub mod evm;
 
 pub use ai_account::{
     ai_account_code_from_root, AI_ACCOUNT_ROOT_LEN, INFO_AI_ACCOUNT_PREFIX, INFO_AI_ACCOUNT_ROOT,
@@ -70,6 +72,10 @@ pub use ai_account::{
 pub use device::{
     derive_device_wrap_key, DEVICE_WRAP_KEY_LEN, INFO_DEVICE_WRAP, MIN_PASSPHRASE_BYTES,
     PASSPHRASE_SALT_LEN,
+};
+pub use evm::{
+    evm_address_checksummed, evm_address_of_key, evm_key_from_root, evm_key_from_seed,
+    evm_seed_from_root, EVM_ADDRESS_LEN, EVM_KEY_LEN, EVM_SEED_LEN, INFO_EVM_WALLET_PREFIX,
 };
 
 use argon2::{Algorithm, Argon2, Block, Params, Version};
@@ -261,6 +267,12 @@ impl DerivedKeys {
     /// wallet 0 is gone.
     pub fn wallet_seed_for(&self, index: u32) -> Zeroizing<[u8; WALLET_SEED_LEN]> {
         wallet_seed_from_root(&self.wallet_root, index)
+    }
+
+    /// The secp256k1 private key of EVM wallet number `index` (NCF-3 §1.9) — the key that pays for
+    /// NMTS Heavy on Filecoin. Hangs off the same wallet root as the Sui wallets.
+    pub fn evm_key_for(&self, index: u32) -> Zeroizing<[u8; EVM_KEY_LEN]> {
+        evm_key_from_root(&self.wallet_root, index)
     }
 
     /// The account code of AI account number `index` (1-based), for this account.
@@ -542,13 +554,23 @@ mod tests {
     fn the_argon2_working_memory_holds_key_material_and_can_be_wiped() {
         use zeroize::Zeroize;
 
-        let params = Params::new(ARGON2_M_COST, ARGON2_T_COST, ARGON2_P_COST, Some(MASTER_LEN))
-            .expect("params");
+        let params = Params::new(
+            ARGON2_M_COST,
+            ARGON2_T_COST,
+            ARGON2_P_COST,
+            Some(MASTER_LEN),
+        )
+        .expect("params");
         let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params.clone());
         let mut memory = vec![Block::default(); params.block_count()];
         let mut out = [0u8; MASTER_LEN];
         argon
-            .hash_password_into_with_memory(&[7u8; ACCOUNT_CODE_BYTES], ARGON2_SALT, &mut out, &mut memory)
+            .hash_password_into_with_memory(
+                &[7u8; ACCOUNT_CODE_BYTES],
+                ARGON2_SALT,
+                &mut out,
+                &mut memory,
+            )
             .expect("argon2id");
 
         let live: usize = memory
@@ -564,7 +586,9 @@ mod tests {
 
         memory.zeroize();
         assert!(
-            memory.iter().all(|b| b.as_ref().iter().all(|&word| word == 0)),
+            memory
+                .iter()
+                .all(|b| b.as_ref().iter().all(|&word| word == 0)),
             "the working memory survived a wipe",
         );
     }
@@ -574,8 +598,13 @@ mod tests {
     /// this catches it here, next to the code that could cause it.
     #[test]
     fn wiping_the_working_memory_does_not_change_what_is_derived() {
-        let params = Params::new(ARGON2_M_COST, ARGON2_T_COST, ARGON2_P_COST, Some(MASTER_LEN))
-            .expect("params");
+        let params = Params::new(
+            ARGON2_M_COST,
+            ARGON2_T_COST,
+            ARGON2_P_COST,
+            Some(MASTER_LEN),
+        )
+        .expect("params");
         let code = [0x5au8; ACCOUNT_CODE_BYTES];
 
         let mut ours = [0u8; MASTER_LEN];

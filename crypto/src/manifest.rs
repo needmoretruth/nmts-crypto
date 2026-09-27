@@ -1,5 +1,6 @@
-//! Recovery manifest (NRM-3, `docs/RECOVERY-MANIFEST.md`): the encrypted index that makes
-//! every file recoverable with only the account code and Walrus, and zero NMTS infrastructure.
+//! Recovery manifest (NRM-5, `docs/RECOVERY-MANIFEST.md`): the encrypted index that makes
+//! every file recoverable with only the account code and the storage networks, and zero NMTS
+//! infrastructure. A part is on Walrus, or — from NRM-5 — on Filecoin ([`filecoin`]).
 //!
 //! # Purpose
 //! The manifest is a JSON document listing every item (name, path, size, per-file DEK, and
@@ -62,6 +63,15 @@
 //! Optional fields (`quilt`, `content_hash`, `sui_object_id`, `network`) are omitted when absent
 //! so byte output stays canonical; `prev_manifest_blob_id` is the deliberate exception (see below).
 
+pub mod filecoin;
+mod meta;
+
+pub use filecoin::{
+    FilecoinCopy, FilecoinProblem, FILECOIN_CHAINS, MANIFEST_VERSION_WITH_FILECOIN,
+    MAX_FILECOIN_COPIES, NETWORK_FILECOIN,
+};
+pub use meta::{Meta, MetaStorage, MetaTotals};
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
@@ -73,13 +83,14 @@ use crate::wrap::{self, WrapError, AAD_RECOVERY_MAP};
 ///
 /// Raised 1 → 2 on 2026-07-29 when `part_index` became required on every part, 2 → 3 on
 /// 2026-08-17 when [`Quilt`] gained the own-quilt placement (`docs/RECOVERY-MANIFEST.md` §6),
-/// and 3 → 4 on 2026-08-18 when a part could say it was PADDED ([`Part::padded_len`]).
+/// 3 → 4 on 2026-08-18 when a part could say it was PADDED ([`Part::padded_len`]), and 4 → 5 on
+/// 2026-09-24 when a part could be on Filecoin ([`MANIFEST_VERSION_WITH_FILECOIN`]).
 /// Each number moved for a single additive form so that the form's ABSENCE means something: see
 /// [`MANIFEST_VERSION_WITH_PART_INDEX`], [`MANIFEST_VERSION_WITH_OWN_QUILT`] and
 /// [`MANIFEST_VERSION_WITH_PADDING`].
 ///
 /// ⚠ **A writer stamps [`minimum_version`], not this.** See that function for why.
-pub const MANIFEST_VERSION: u32 = 4;
+pub const MANIFEST_VERSION: u32 = 5;
 
 /// The first NRM version in which `part_index` is required on every part.
 ///
@@ -113,15 +124,17 @@ pub const MANIFEST_VERSION_WITH_PADDING: u32 = 4;
 /// before its own quilt existed. The file a person downloads is built from a finished upload, so
 /// every placement in it is absolute.
 pub fn minimum_version(items: &[Item]) -> u32 {
-    let padded = items
-        .iter()
-        .flat_map(|item| item.parts.iter())
-        .any(|part| part.padded_len.is_some());
+    let parts = || items.iter().flat_map(|item| item.parts.iter());
+    let filecoin = parts()
+        .any(|p| p.network_name() == NETWORK_FILECOIN || p.chain.is_some() || p.copies.is_some());
+    let padded = parts().any(|part| part.padded_len.is_some());
     let own_quilt = items
         .iter()
         .filter_map(|item| item.quilt.as_ref())
         .any(|q| q.identifier.is_some());
-    if padded {
+    if filecoin {
+        MANIFEST_VERSION_WITH_FILECOIN
+    } else if padded {
         MANIFEST_VERSION_WITH_PADDING
     } else if own_quilt {
         MANIFEST_VERSION_WITH_OWN_QUILT
@@ -239,7 +252,9 @@ pub enum ManifestError {
     /// meant: `{quilt_blob_id, patch_id}` names a quilt anywhere on the network, while
     /// `{identifier}` means "the quilt this document itself was read out of". A record carrying
     /// pieces of both, or neither, is not a placement.
-    #[error("item {item_id}: the quilt record is neither an absolute placement nor an own-quilt one")]
+    #[error(
+        "item {item_id}: the quilt record is neither an absolute placement nor an own-quilt one"
+    )]
     QuiltFormUnclear {
         /// The item's NMTS id.
         item_id: String,
@@ -262,7 +277,9 @@ pub enum ManifestError {
     /// Absence is legal in exactly one situation — the bytes are in the quilt this document was
     /// read from, whose id the document cannot contain — and anywhere else it is a part with no
     /// address at all.
-    #[error("item {item_id}: the part at position {position} has no blob_id and no own-quilt placement")]
+    #[error(
+        "item {item_id}: the part at position {position} has no blob_id and no own-quilt placement"
+    )]
     BlobIdMissing {
         /// The item's NMTS id.
         item_id: String,
@@ -316,6 +333,18 @@ pub enum ManifestError {
         plaintext_len: u64,
         /// The padded length it claims the sealed stream declares.
         padded_len: u64,
+    },
+    /// A part broke one of NRM-5's Filecoin rules (`docs/RECOVERY-MANIFEST.md` §2.4) — which one
+    /// is `problem`. Same reasoning as the padding pair above: a form in a document too old for it
+    /// is an alteration, and a contradiction has no reading a parser may pick.
+    #[error("item {item_id}: the part at position {position} {problem}")]
+    Filecoin {
+        /// The item's NMTS id.
+        item_id: String,
+        /// Position in the item's `parts` array.
+        position: usize,
+        /// Which rule.
+        problem: FilecoinProblem,
     },
     /// An item's parts do not add up to the item's `size` — refused on the WRITE path.
     ///
@@ -416,11 +445,20 @@ pub struct Part {
     /// parses this document may be doing it years from now with none of our code beside them;
     /// a bare `1` would be unresolvable.
     ///
-    /// `None` means Walrus — a fact rather than a fallback, since no other network has ever had
-    /// an upload path (CRYPTO-FORMAT-NCF2.md §6). Use [`Part::network_name`] rather than
-    /// unwrapping, so that assumption stays written down in exactly one place.
+    /// `None` means Walrus — a fact rather than a fallback: every part written before the field
+    /// existed is on Walrus (CRYPTO-FORMAT-NCF2.md §6), and a Filecoin part must say `"filecoin"`
+    /// (NRM-5). Use [`Part::network_name`] rather than unwrapping, so that assumption stays
+    /// written down in exactly one place.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub network: Option<String>,
+    /// Which Filecoin network issued `blob_id` — one of [`FILECOIN_CHAINS`] (NRM-5). Present on
+    /// every Filecoin part and on no other part; [`filecoin`] holds the rules.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub chain: Option<String>,
+    /// The storage companies keeping a whole copy of this part, in the order a reader tries them
+    /// (NRM-5): 1 to [`MAX_FILECOIN_COPIES`] on a Filecoin part, absent on any other part.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub copies: Option<Vec<FilecoinCopy>>,
     /// On-chain Sui object ID of this part's blob, when the writing client captured it.
     ///
     /// Not needed to READ a blob (aggregators serve by blob ID), so recovery never depends
@@ -602,92 +640,6 @@ impl Item {
     }
 }
 
-/// Where the bytes a document points at actually live.
-///
-/// Every field is optional and every field is a HINT. A blob id is only meaningful on the network
-/// that issued it, and until this block existed a list said `"walrus"` and stopped there — so a
-/// list from testnet and a list from mainnet were indistinguishable and the recovery program's
-/// README carried that as a known limitation. `chain` is the half that was missing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct MetaStorage {
-    /// Storage network family, the same word a part carries (`"walrus"`).
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub network: Option<String>,
-    /// Which of that network's chains issued the ids — `"mainnet"` / `"testnet"`.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub chain: Option<String>,
-    /// Read endpoints the writing build was using. The FIRST thing here to go stale, so a reader
-    /// treats them as candidates beside its own defaults, never as instructions.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub aggregators: Vec<String>,
-    /// A JSON-RPC endpoint for looking up `sui_object_id`. Never needed to READ a blob.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub chain_rpc: Option<String>,
-}
-
-/// What a document claims to hold, beside what it actually holds.
-///
-/// ⛔ NOT an integrity check, and a reader must not treat a disagreement as tampering: the whole
-/// document is one authenticated envelope, so nobody can edit `items` without the account code.
-/// It is for a RE-IMPLEMENTATION — a parser written years from now against the format document,
-/// which drops records it does not recognise, has no other way to notice it read 400 of 412 files.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct MetaTotals {
-    /// How many items the writer placed.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub items: Option<u64>,
-    /// The plaintext bytes those items add up to.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub bytes: Option<u64>,
-}
-
-/// What the document says about ITSELF (`docs/RECOVERY-MANIFEST.md` §2.3).
-///
-/// # Why it exists
-/// A recovery list describes an account thoroughly and used to describe itself barely at all. The
-/// person it is FOR is holding one file, years later, with no site to visit and no memory of what
-/// wrote it: which program reads this, where is that program, where is the format written down,
-/// and which chain do these addresses belong to were all unanswered. A few hundred bytes buys
-/// every one of those answers, and the document is sealed, so they cost no privacy.
-///
-/// # ⚠ Every field is a claim, and every field is optional
-/// A reader must never REQUIRE any of it. These are strings the writing build printed about
-/// itself and about other programs; a URL can die and a repository can move. They save a person a
-/// search — they never decide whether a recovery may proceed.
-///
-/// # ⛔ Its presence does not move [`MANIFEST_VERSION`]
-/// Absence changes no meaning, so the builds already published read a document carrying it exactly
-/// as they read one without it (the owner's compatibility rule: until a 1.0.0 exists, a format may run ahead of
-/// the tools, but never in a way that makes a published build refuse a file it could read). This crate sets no `deny_unknown_fields`, which is what
-/// makes that true rather than hoped for.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct Meta {
-    /// Product name, e.g. `"NMTS"`.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub product: Option<String>,
-    /// Where the product is.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub product_url: Option<String>,
-    /// The product release that wrote this document.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub app_version: Option<String>,
-    /// The standalone program that reads it, by its published name.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub tool: Option<String>,
-    /// Where to get that program.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub tool_url: Option<String>,
-    /// Where this format is written down, in a copy the reader can actually reach.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub spec_url: Option<String>,
-    /// Which network and chain the addresses in this document belong to.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub storage: Option<MetaStorage>,
-    /// What the document claims to hold — see [`MetaTotals`].
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub totals: Option<MetaTotals>,
-}
-
 /// The recovery manifest document (RECOVERY-MANIFEST.md §2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryManifest {
@@ -733,7 +685,7 @@ impl RecoveryManifest {
     ///   this crate can never seal a list it would then decline to open;
     /// * the declared `v` against [`minimum_version`] — a document that uses a form its own
     ///   version does not admit is one this crate would refuse on the way back in;
-    /// * padding — the same [`Self::check_padding`] both sides run;
+    /// * padding and Filecoin — the same checks both sides run;
     /// * `size` against the sum of the parts' `plaintext_len` — a writer MUST refuse an item
     ///   where those disagree. It is asymmetric on purpose: see [`Item::parts_add_up`] for why
     ///   a reader is offered the same question instead of being stopped by it.
@@ -741,6 +693,7 @@ impl RecoveryManifest {
         self.check_part_placement()?;
         self.check_quilt_placement()?;
         self.check_padding()?;
+        filecoin::check(self)?;
         for item in &self.items {
             if !item.parts_add_up() {
                 return Err(ManifestError::PartsDoNotAddUp {
@@ -760,6 +713,7 @@ impl RecoveryManifest {
         manifest.check_part_placement()?;
         manifest.check_quilt_placement()?;
         manifest.check_padding()?;
+        filecoin::check(&manifest)?;
         Ok(manifest)
     }
 
@@ -831,7 +785,9 @@ impl RecoveryManifest {
         let padding_allowed = self.v >= MANIFEST_VERSION_WITH_PADDING;
         for item in &self.items {
             for (position, part) in item.parts.iter().enumerate() {
-                let Some(padded_len) = part.padded_len else { continue };
+                let Some(padded_len) = part.padded_len else {
+                    continue;
+                };
                 if !padding_allowed {
                     return Err(ManifestError::PaddingTooOld {
                         item_id: item.id.clone(),

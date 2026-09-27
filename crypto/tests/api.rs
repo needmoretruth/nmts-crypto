@@ -231,11 +231,17 @@ fn name_and_meta_roundtrip() {
     let dk = [0x12u8; 32];
     let name = "report 2026 — 최종.pdf";
     let env = wrap::seal(&dk, wrap::AAD_NAME, name.as_bytes());
-    assert_eq!(wrap::open(&dk, wrap::AAD_NAME, &env).unwrap(), name.as_bytes());
+    assert_eq!(
+        wrap::open(&dk, wrap::AAD_NAME, &env).unwrap(),
+        name.as_bytes()
+    );
 
     let meta = r#"{"path":"/a/b","tags":["x"]}"#;
     let menv = wrap::seal(&dk, wrap::AAD_META, meta.as_bytes());
-    assert_eq!(wrap::open(&dk, wrap::AAD_META, &menv).unwrap(), meta.as_bytes());
+    assert_eq!(
+        wrap::open(&dk, wrap::AAD_META, &menv).unwrap(),
+        meta.as_bytes()
+    );
     // name and meta share the key but not the AAD.
     assert!(wrap::open(&dk, wrap::AAD_META, &env).is_err());
 }
@@ -344,6 +350,8 @@ fn sample_manifest() -> RecoveryManifest {
                         sui_object_id: Some("0xabc".into()),
                         // Named outright — what every map written from now on looks like.
                         network: Some("walrus".into()),
+                        chain: None,
+                        copies: None,
                     },
                     Part {
                         part_index: Some(1),
@@ -353,6 +361,8 @@ fn sample_manifest() -> RecoveryManifest {
                         sui_object_id: None,
                         // Omitted — what every map written BEFORE the field looks like.
                         network: None,
+                        chain: None,
+                        copies: None,
                     },
                 ],
                 quilt: None,
@@ -374,13 +384,16 @@ fn sample_manifest() -> RecoveryManifest {
                     padded_len: None,
                     sui_object_id: None,
                     // A non-default name, so neither implementation can pass by hardcoding
-                    // "walrus". Nothing is stored on Filecoin — this exercises the format.
-                    network: Some("filecoin".into()),
+                    // "walrus". Nothing is stored on Arweave — this exercises the format. (It was
+                    // "filecoin" until NRM-5 gave that name fields a v2 document cannot carry.)
+                    network: Some("arweave".into()),
+                    chain: None,
+                    copies: None,
                 }],
                 quilt: Some(Quilt {
                     quilt_blob_id: Some("quiltX".into()),
                     patch_id: Some("patch7".into()),
-            identifier: None,
+                    identifier: None,
                 }),
             },
         ],
@@ -480,15 +493,16 @@ fn manifest_still_parses_an_nrm1_document() {
 
 /// The version marker moved to 2 when `part_index` became required.
 #[test]
-fn manifest_version_is_four() {
+fn manifest_version_is_five() {
     // Pinned as a LITERAL, because every other test here compares against the constant and so
     // proves the number travels rather than what it is — and what it is carries the whole
     // compatibility story (RECOVERY-MANIFEST.md §6). Moving it means moving that section too.
-    assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION, 4);
+    assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION, 5);
     // The thresholds are separate facts from "the newest we can write", and each stays put.
     assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION_WITH_PART_INDEX, 2);
     assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION_WITH_OWN_QUILT, 3);
     assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION_WITH_PADDING, 4);
+    assert_eq!(nmts_crypto::manifest::MANIFEST_VERSION_WITH_FILECOIN, 5);
 }
 
 /// ⛔ A document only claims v3 when it USES v3, and this is the compatibility promise in one
@@ -507,6 +521,8 @@ fn a_document_claims_the_version_its_contents_need_and_no_more() {
         padded_len: None,
         sui_object_id: None,
         network: Some("walrus".into()),
+        chain: None,
+        copies: None,
     }];
     own.items[1].quilt = Some(Quilt {
         quilt_blob_id: None,
@@ -522,117 +538,6 @@ fn a_document_claims_the_version_its_contents_need_and_no_more() {
     let mut padded = sample_manifest();
     padded.items[0].parts[1].padded_len = Some(4_194_304);
     assert_eq!(manifest::minimum_version(&padded.items), 4);
-}
-
-/// The NRM-4 fixture parses, and the two numbers a padded part carries stay apart.
-///
-/// ⛔ What would make this test pass while the format was broken: reading `padded_len` as the
-///    part's contribution. So it asserts the SUM — the parts still add up to `size` — which is
-///    the invariant padding must not cost, and the one that catches an edited `size`.
-#[test]
-fn manifest_reads_the_padded_nrm4_fixture() {
-    let raw = include_bytes!("vectors/nrm4-sample.json");
-    let parsed = RecoveryManifest::from_json(raw).expect("the NRM-4 fixture must parse");
-    assert_eq!(parsed.v, 4);
-
-    let small = &parsed.items[0];
-    assert_eq!(small.size, 12);
-    assert_eq!(small.parts[0].plaintext_len, 12);
-    assert_eq!(small.parts[0].padded_len, Some(1_048_576));
-    assert_eq!(small.parts[0].stream_plaintext_len(), 1_048_576);
-    assert!(small.parts_add_up(), "padding must not disturb the size arithmetic");
-
-    let big = &parsed.items[1];
-    // The full part is untouched and answers the same for both numbers; only the tail is padded.
-    assert_eq!(big.parts[0].padded_len, None);
-    assert_eq!(big.parts[0].stream_plaintext_len(), 1_073_741_824);
-    assert_eq!(big.parts[1].padded_len, Some(4_194_304));
-    assert!(big.parts_add_up());
-
-    let emitted = parsed.to_json().unwrap();
-    assert_eq!(fixture_json(&emitted), fixture_json(raw));
-}
-
-/// ⛔ Every padded document a reader would have to guess about is refused, on BOTH paths.
-///
-/// The write path matters as much as the read path here: this crate is what the browser compiles
-/// to WASM, so a refusal on `to_json` is what stops a contradictory list being sealed and handed
-/// to somebody as their only copy.
-#[test]
-fn manifest_refuses_padding_that_contradicts_itself() {
-    let doc = |v: u32, part: &str| {
-        format!(
-            r#"{{"v":{v},"seq":1,"prev_manifest_blob_id":null,
-            "generated_at":"2026-08-18T00:00:00Z","account_id":"x","items":[
-            {{"id":"i","name":"n","path":"/","size":4,"dek":"d","kind":"file",
-              "parts":[{part}]}}]}}"#
-        )
-        .into_bytes()
-    };
-    let padded = r#"{"part_index":0,"blob_id":"a","plaintext_len":4,"padded_len":64}"#;
-
-    // 1. The form needs its version. A v3 document using it was altered, not written early.
-    assert!(matches!(
-        RecoveryManifest::from_json(&doc(3, padded)),
-        Err(manifest::ManifestError::PaddingTooOld { .. })
-    ));
-
-    // 2. Equal is not padding — it is written as absence, so that two identical lists cannot
-    //    differ in their canonical bytes.
-    assert!(matches!(
-        RecoveryManifest::from_json(&doc(4, r#"{"part_index":0,"blob_id":"a","plaintext_len":4,"padded_len":4}"#)),
-        Err(manifest::ManifestError::PaddingNotLarger { .. })
-    ));
-
-    // 3. Smaller is a stream that could not have held the part at all.
-    assert!(matches!(
-        RecoveryManifest::from_json(&doc(4, r#"{"part_index":0,"blob_id":"a","plaintext_len":4,"padded_len":3}"#)),
-        Err(manifest::ManifestError::PaddingNotLarger { .. })
-    ));
-
-    // 4. The same three refusals on the way OUT, from structs rather than from JSON.
-    let mut m = RecoveryManifest::from_json(&doc(4, padded)).expect("the honest form must parse");
-    m.v = 3;
-    assert!(matches!(m.to_json(), Err(manifest::ManifestError::PaddingTooOld { .. })));
-    m.v = 4;
-    m.items[0].parts[0].padded_len = Some(4);
-    assert!(matches!(m.to_json(), Err(manifest::ManifestError::PaddingNotLarger { .. })));
-}
-
-/// The NRM-3 fixture parses, and BOTH placements in it resolve to what they say they are.
-///
-/// Reading only one of the two is the failure worth guarding: a recovery would return the older
-/// files and quietly lose the ones from the very upload the list rode along with.
-#[test]
-fn manifest_reads_both_placements_of_the_nrm3_fixture() {
-    let raw = include_bytes!("vectors/nrm3-sample.json");
-    let parsed = RecoveryManifest::from_json(raw).expect("the NRM-3 fixture must parse");
-    assert_eq!(parsed.v, 3);
-
-    let placements: Vec<_> = parsed
-        .items
-        .iter()
-        .map(|i| i.quilt.as_ref().and_then(Quilt::placement))
-        .collect();
-    assert_eq!(
-        placements[0],
-        Some(manifest::Placement::Absolute {
-            quilt_blob_id: "quiltX",
-            patch_id: "patch7"
-        })
-    );
-    assert_eq!(
-        placements[1],
-        Some(manifest::Placement::OwnQuilt {
-            identifier: "55555555-5555-4555-8555-555555555555"
-        })
-    );
-    // The own-quilt item names no blob, and that absence is the document being honest rather
-    // than incomplete: the blob did not exist yet when it was written.
-    assert!(parsed.items[1].parts[0].blob_id.is_none());
-
-    let emitted = parsed.to_json().unwrap();
-    assert_eq!(fixture_json(&emitted), fixture_json(raw));
 }
 
 /// The self-description fixture parses, says what it says, and comes back out byte-identical.
@@ -667,73 +572,18 @@ fn manifest_reads_the_self_description_fixture() {
 
     // Dates on the first item; NONE on the second, which is what a file uploaded before the fields
     // existed looks like. A reader that defaulted the absence would date it 1970.
-    assert_eq!(parsed.items[0].updated_at.as_deref(), Some("2026-03-04T05:06:07Z"));
-    assert_eq!(parsed.items[0].created_at.as_deref(), Some("2026-02-03T04:05:06Z"));
+    assert_eq!(
+        parsed.items[0].updated_at.as_deref(),
+        Some("2026-03-04T05:06:07Z")
+    );
+    assert_eq!(
+        parsed.items[0].created_at.as_deref(),
+        Some("2026-02-03T04:05:06Z")
+    );
     assert!(parsed.items[1].updated_at.is_none());
 
     let emitted = parsed.to_json().unwrap();
     assert_eq!(fixture_json(&emitted), fixture_json(raw));
-}
-
-/// Every way of writing a placement that a reader would have to guess about is refused.
-///
-/// Each case is a document that could be produced by an editing mistake or by tampering, and in
-/// every one of them the plausible guess fetches the wrong bytes. Refusing costs a person an
-/// error message; guessing costs them the file and tells them it worked.
-#[test]
-fn manifest_refuses_every_ambiguous_placement() {
-    let doc = |v: u32, parts: &str, quilt: &str| {
-        format!(
-            r#"{{"v":{v},"seq":1,"prev_manifest_blob_id":null,
-            "generated_at":"2026-08-17T00:00:00Z","account_id":"x","items":[
-            {{"id":"i","name":"n","path":"/","size":1,"dek":"d","kind":"file",
-              "parts":[{parts}],"quilt":{quilt}}}]}}"#
-        )
-        .into_bytes()
-    };
-    let one_part = r#"{"part_index":0,"plaintext_len":1}"#;
-    let one_part_with_blob = r#"{"part_index":0,"blob_id":"a","plaintext_len":1}"#;
-
-    // Half an absolute placement: a patch id with no quilt to look for it in.
-    let err = RecoveryManifest::from_json(&doc(3, one_part_with_blob, r#"{"patch_id":"p"}"#))
-        .unwrap_err();
-    assert!(matches!(err, ManifestError::QuiltFormUnclear { .. }), "{err}");
-
-    // Both forms at once — which one is the reader supposed to believe?
-    let both = r#"{"quilt_blob_id":"q","patch_id":"p","identifier":"x"}"#;
-    let err = RecoveryManifest::from_json(&doc(3, one_part_with_blob, both)).unwrap_err();
-    assert!(matches!(err, ManifestError::QuiltFormUnclear { .. }), "{err}");
-
-    // The v3 form inside a document that calls itself v2: an altered document, not an old one.
-    let err = RecoveryManifest::from_json(&doc(2, one_part, r#"{"identifier":"x"}"#)).unwrap_err();
-    assert!(matches!(err, ManifestError::OwnQuiltTooOld { v: 2, .. }), "{err}");
-
-    // Own-quilt AND a blob id: the form means "the blob is not named yet", so naming one is a
-    // contradiction, and picking either half would be inventing the answer.
-    let err =
-        RecoveryManifest::from_json(&doc(3, one_part_with_blob, r#"{"identifier":"x"}"#)).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            ManifestError::OwnQuiltPartsWrong {
-                blob_id_present: true,
-                ..
-            }
-        ),
-        "{err}"
-    );
-
-    // Own-quilt across two parts: a quilted item is one patch in one blob.
-    let two = format!("{one_part},{}", r#"{"part_index":1,"plaintext_len":0}"#);
-    let err = RecoveryManifest::from_json(&doc(3, &two, r#"{"identifier":"x"}"#)).unwrap_err();
-    assert!(
-        matches!(err, ManifestError::OwnQuiltPartsWrong { parts: 2, .. }),
-        "{err}"
-    );
-
-    // A part with no blob id and no own-quilt placement has no address at all.
-    let err = RecoveryManifest::from_json(&doc(3, one_part, "null")).unwrap_err();
-    assert!(matches!(err, ManifestError::BlobIdMissing { position: 0, .. }), "{err}");
 }
 
 /// A `v: 2` document with a part that carries no `part_index` is refused.
@@ -888,7 +738,7 @@ fn manifest_part_without_a_network_reads_as_walrus() {
     assert_eq!(named.network_name(), "walrus");
     assert_eq!(unnamed.network_name(), "walrus");
     // A named non-default network is carried through untouched.
-    assert_eq!(m.items[1].parts[0].network_name(), "filecoin");
+    assert_eq!(m.items[1].parts[0].network_name(), "arweave");
 }
 
 #[test]
@@ -941,6 +791,8 @@ fn manifest_omits_absent_optional_fields() {
                 padded_len: None,
                 sui_object_id: None,
                 network: None,
+                chain: None,
+                copies: None,
             }],
             quilt: None,
         }],
@@ -956,6 +808,9 @@ fn manifest_omits_absent_optional_fields() {
         "meta",
         "created_at",
         "updated_at",
+        // NRM-5's two, absent on every part that is not on Filecoin.
+        "chain",
+        "copies",
     ] {
         assert!(
             !json.contains(absent),
@@ -1007,7 +862,14 @@ fn manifest_meta_round_trips_without_moving_the_version() {
     assert_eq!(manifest::minimum_version(&back.items), 2);
     // The one field that closes a documented hole: which chain the blob ids came from.
     assert_eq!(
-        back.meta.as_ref().unwrap().storage.as_ref().unwrap().chain.as_deref(),
+        back.meta
+            .as_ref()
+            .unwrap()
+            .storage
+            .as_ref()
+            .unwrap()
+            .chain
+            .as_deref(),
         Some("mainnet")
     );
 }
@@ -1242,8 +1104,16 @@ fn t_payload() -> share::SharePayload<'static> {
 fn share_wrap_roundtrip_and_isolation() {
     let alice = kdf::derive_from_bytes(&[0x11u8; 20]).unwrap();
     let bob = kdf::derive_from_bytes(&[0x22u8; 20]).unwrap();
-    let alice_pub = share::public_key(&alice.share_kem_seed, &alice.share_auth_secret, &alice.share_sig_seed);
-    let bob_pub = share::public_key(&bob.share_kem_seed, &bob.share_auth_secret, &bob.share_sig_seed);
+    let alice_pub = share::public_key(
+        &alice.share_kem_seed,
+        &alice.share_auth_secret,
+        &alice.share_sig_seed,
+    );
+    let bob_pub = share::public_key(
+        &bob.share_kem_seed,
+        &bob.share_auth_secret,
+        &bob.share_sig_seed,
+    );
     let bob_addr = bob_pub.address();
 
     let dek = *wrap::generate_dek();
@@ -1328,8 +1198,16 @@ fn a_substituted_public_key_cannot_pass_as_a_recipient() {
     let alice = kdf::derive_from_bytes(&[0x11u8; 20]).unwrap();
     let bob = kdf::derive_from_bytes(&[0x22u8; 20]).unwrap();
     let server = kdf::derive_from_bytes(&[0x99u8; 20]).unwrap();
-    let bob_pub = share::public_key(&bob.share_kem_seed, &bob.share_auth_secret, &bob.share_sig_seed);
-    let server_pub = share::public_key(&server.share_kem_seed, &server.share_auth_secret, &server.share_sig_seed);
+    let bob_pub = share::public_key(
+        &bob.share_kem_seed,
+        &bob.share_auth_secret,
+        &bob.share_sig_seed,
+    );
+    let server_pub = share::public_key(
+        &server.share_kem_seed,
+        &server.share_auth_secret,
+        &server.share_sig_seed,
+    );
 
     // The address Bob published belongs to Bob's key and to nothing else.
     assert!(
@@ -1372,9 +1250,12 @@ fn a_substituted_public_key_cannot_pass_as_a_recipient() {
     // §5.2a it is the SELF-SIGNATURE that stops it, and the difference is visible here — the
     // forged bundle keeps Bob's address (his root is untouched) and is refused at parse instead.
     let mut forged = bob_pub.to_bytes();
-    let attacker_auth =
-        share::public_key(&server.share_kem_seed, &server.share_auth_secret, &server.share_sig_seed)
-            .to_bytes();
+    let attacker_auth = share::public_key(
+        &server.share_kem_seed,
+        &server.share_auth_secret,
+        &server.share_sig_seed,
+    )
+    .to_bytes();
     let auth_at = share::SHARE_SIGNED_LEN - 32;
     forged[auth_at..share::SHARE_SIGNED_LEN]
         .copy_from_slice(&attacker_auth[auth_at..share::SHARE_SIGNED_LEN]);
@@ -1392,8 +1273,16 @@ fn a_substituted_public_key_cannot_pass_as_a_recipient() {
 fn share_wrap_rejects_tampering_and_bad_lengths() {
     let alice = kdf::derive_from_bytes(&[0x11u8; 20]).unwrap();
     let bob = kdf::derive_from_bytes(&[0x33u8; 20]).unwrap();
-    let alice_pub = share::public_key(&alice.share_kem_seed, &alice.share_auth_secret, &alice.share_sig_seed);
-    let bob_pub = share::public_key(&bob.share_kem_seed, &bob.share_auth_secret, &bob.share_sig_seed);
+    let alice_pub = share::public_key(
+        &alice.share_kem_seed,
+        &alice.share_auth_secret,
+        &alice.share_sig_seed,
+    );
+    let bob_pub = share::public_key(
+        &bob.share_kem_seed,
+        &bob.share_auth_secret,
+        &bob.share_sig_seed,
+    );
     let dek = *wrap::generate_dek();
     let env = share::wrap_dek_for(
         &alice.share_auth_secret,
@@ -1475,9 +1364,21 @@ fn an_envelope_proves_which_account_sent_it() {
     let alice = kdf::derive_from_bytes(&[0x11u8; 20]).unwrap();
     let bob = kdf::derive_from_bytes(&[0x22u8; 20]).unwrap();
     let carol = kdf::derive_from_bytes(&[0x77u8; 20]).unwrap();
-    let alice_pub = share::public_key(&alice.share_kem_seed, &alice.share_auth_secret, &alice.share_sig_seed);
-    let bob_pub = share::public_key(&bob.share_kem_seed, &bob.share_auth_secret, &bob.share_sig_seed);
-    let carol_pub = share::public_key(&carol.share_kem_seed, &carol.share_auth_secret, &carol.share_sig_seed);
+    let alice_pub = share::public_key(
+        &alice.share_kem_seed,
+        &alice.share_auth_secret,
+        &alice.share_sig_seed,
+    );
+    let bob_pub = share::public_key(
+        &bob.share_kem_seed,
+        &bob.share_auth_secret,
+        &bob.share_sig_seed,
+    );
+    let carol_pub = share::public_key(
+        &carol.share_kem_seed,
+        &carol.share_auth_secret,
+        &carol.share_sig_seed,
+    );
 
     let dek = *wrap::generate_dek();
     let env = share::wrap_dek_for(
@@ -1563,9 +1464,21 @@ fn a_forger_holding_only_public_keys_cannot_impersonate_a_sender() {
     let alice = kdf::derive_from_bytes(&[0x11u8; 20]).unwrap();
     let bob = kdf::derive_from_bytes(&[0x22u8; 20]).unwrap();
     let carol = kdf::derive_from_bytes(&[0x77u8; 20]).unwrap();
-    let alice_pub = share::public_key(&alice.share_kem_seed, &alice.share_auth_secret, &alice.share_sig_seed);
-    let bob_pub = share::public_key(&bob.share_kem_seed, &bob.share_auth_secret, &bob.share_sig_seed);
-    let carol_pub = share::public_key(&carol.share_kem_seed, &carol.share_auth_secret, &carol.share_sig_seed);
+    let alice_pub = share::public_key(
+        &alice.share_kem_seed,
+        &alice.share_auth_secret,
+        &alice.share_sig_seed,
+    );
+    let bob_pub = share::public_key(
+        &bob.share_kem_seed,
+        &bob.share_auth_secret,
+        &bob.share_sig_seed,
+    );
+    let carol_pub = share::public_key(
+        &carol.share_kem_seed,
+        &carol.share_auth_secret,
+        &carol.share_sig_seed,
+    );
 
     // Carol knows Bob's published key — everyone does — and encapsulates to it correctly.
     let dek = *wrap::generate_dek();
@@ -1623,8 +1536,16 @@ fn a_share_does_not_open_for_an_account_it_was_not_addressed_to() {
     let alice = kdf::derive_from_bytes(&[0x11u8; 20]).unwrap();
     let bob = kdf::derive_from_bytes(&[0x22u8; 20]).unwrap();
     let carol = kdf::derive_from_bytes(&[0x77u8; 20]).unwrap();
-    let alice_pub = share::public_key(&alice.share_kem_seed, &alice.share_auth_secret, &alice.share_sig_seed);
-    let bob_pub = share::public_key(&bob.share_kem_seed, &bob.share_auth_secret, &bob.share_sig_seed);
+    let alice_pub = share::public_key(
+        &alice.share_kem_seed,
+        &alice.share_auth_secret,
+        &alice.share_sig_seed,
+    );
+    let bob_pub = share::public_key(
+        &bob.share_kem_seed,
+        &bob.share_auth_secret,
+        &bob.share_sig_seed,
+    );
 
     let dek = *wrap::generate_dek();
     let env = share::wrap_dek_for(
@@ -1671,7 +1592,12 @@ fn share_identity_is_deterministic_and_distinct_from_the_other_derivations() {
     );
     assert_eq!(
         share::public_key(&a.share_kem_seed, &a.share_auth_secret, &a.share_sig_seed).to_bytes(),
-        share::public_key(&again.share_kem_seed, &again.share_auth_secret, &again.share_sig_seed).to_bytes()
+        share::public_key(
+            &again.share_kem_seed,
+            &again.share_auth_secret,
+            &again.share_sig_seed
+        )
+        .to_bytes()
     );
     assert_eq!(
         share::address_for(&a.share_sig_seed),
@@ -1832,7 +1758,11 @@ fn ncf3_derivations_match_the_pinned_known_answers() {
         "the published identity is version(1) + root(1316) + epoch(4) + pk_kem(1216) \
          + pk_auth(32) + self_sig(2420)"
     );
-    assert_eq!(id.root().len(), 1316, "the fingerprinted root is index(4) + pk_sig(1312)");
+    assert_eq!(
+        id.root().len(),
+        1316,
+        "the fingerprinted root is index(4) + pk_sig(1312)"
+    );
     assert_eq!(
         sha256_of(&id.to_bytes()),
         "ba7641d8faf5b99d458daf1a742fd349fa12abad061ccecb41212fb3964ec673",

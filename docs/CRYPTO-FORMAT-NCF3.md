@@ -340,6 +340,44 @@ code(words) = BIP-39 entropy of the words, after: split on any whitespace · dro
 ⛔ **This is an ADDITION, not NCF-4.** No key, envelope, address or code changes value; this is a
 second way to type the input of §1.1, and it takes no separator.
 
+### 1.9 EVM wallets — the key that pays for NMTS Heavy on Filecoin (added 2026-09-23)
+
+```text
+evmSeed(N)  = HKDF-Expand(walletRoot, "nmts/v3/evm-wallet/" || dec(N), 48)   // for every N ≥ 0
+evmKey(N)   = (OS2IP(evmSeed(N)) mod (n − 1)) + 1        // n = the secp256k1 group order
+evmAddr(N)  = keccak256(X ‖ Y of evmKey(N)·G)[12..32]    // 20 bytes; written EIP-55
+```
+
+NMTS Heavy stores a sealed part on Filecoin, whose storage is paid through EVM contracts, so an
+account needs a secp256k1 key the same way it needs its Sui wallets. `OS2IP` reads the 48 bytes as
+one big-endian integer. The 20-byte address is the account's `0x…` address on Filecoin's EVM and,
+spelled in Filecoin's delegated form, its `f410…` / `t410…` address — one account, two spellings.
+
+- **Off `walletRoot`, like every wallet.** Holding the wallet root yields wallets and nothing else
+  (§1.3), and an EVM key is a wallet. Exporting one EVM key discloses that wallet, never `dataKey`.
+- **48 bytes and `mod (n − 1)) + 1` — FIPS 186-5 Appendix A.2.1**, key generation with extra
+  random bits. There is no rejection loop and no retry counter for two implementations to disagree
+  about, the result is never 0, and the bias is below 2⁻¹²⁸. 48 is RFC 9380's `L` for a 256-bit
+  order at the 128-bit level.
+- **Not the Ed25519 seed of the same index.** One secret, one purpose: reusing `walletSeed(N)` as a
+  secp256k1 scalar would make exporting a Sui wallet also export an EVM wallet.
+- **Not BIP-32/BIP-44 from the recovery phrase (§1.8).** That path (`m/44'/60'/0'/0/N`) would show
+  the same address in any EVM wallet the phrase is typed into — and would teach people to type the
+  secret that opens every file into software that only needed a wallet key. It also breaks §1.8's
+  promise: BIP-39 seeds are computed from the WORDS, so the English and Korean spellings of one code
+  would give two different wallets. The exported private key (32 bytes of hex) imports into every
+  EVM wallet, which is the interoperability that matters.
+- `dec(N)` is `N` in decimal ASCII with no padding, as in §1.3. `nmts/v3/evm-wallet/` and
+  `nmts/v3/wallet/` are not prefixes of each other.
+
+⛔ **This is an ADDITION, not NCF-4**, by the test §1.5, §1.7 and §2.5 applied: no existing key,
+envelope, address or code changes value, and no reader of existing data behaves differently. What is
+taken is one label in §2.1. A derivation carries no version byte of its own — nothing is stored — so
+if this one ever has to change, the change is a NEW label beside it (the label is the version), and
+the old one keeps deriving the wallets people funded.
+
+Vectors: §7 item 11.
+
 ---
 
 ## 2. Domain separator registry
@@ -361,6 +399,7 @@ against this section; adding a separator without adding the row fails that test.
 | `nmts/v3/share-sig` | 32 | ML-DSA-44 signing-key seed ξ for the identity self-signature (§5.1, §5.2a) |
 | `nmts/v3/wallet-root` | 32 | Parent of every wallet seed |
 | `nmts/v3/wallet/<N>` | 32 | Wallet `N`, expanded from `walletRoot` (§1.3) |
+| `nmts/v3/evm-wallet/<N>` | **48** | EVM wallet `N`'s seed, expanded from `walletRoot` (§1.9, added 2026-09-23) and reduced to a secp256k1 key by FIPS 186-5 A.2.1. Forty-eight bytes, not thirty-two: the extra 128 bits are what make the reduction's bias negligible |
 | `nmts/v3/ai-account-root` | 32 | Parent of every AI-account code (§1.5, added 2026-09-06) |
 | `nmts/v3/ai-account/<N>` | **20** | The account CODE of AI account `N`, expanded from `aiAccountRoot` (§1.5). Twenty bytes, not thirty-two: the output *is* a 160-bit account code |
 | `nmts/v3/opener-wrap/1` | 32 | The key one opener's slot is sealed under (§1.7, added 2026-09-20). The trailing `1` is the frozen version of the pair (message, derivation), not an index: a `/2` would be a new row, never an edit of this one |
@@ -382,8 +421,11 @@ against this section; adding a separator without adding the row fails that test.
 | `nmts/v3/file-list` | `fileListKey` | The sealed file list (**N1**: was `manifest`) |
 | `nmts/v3/file-list-chunk` | `fileListKey` | One chunk of the chunked file list (§6.3, added 2026-09-06). A different label from the index so a chunk can never be presented as an index, or an index as a chunk |
 | `nmts/v3/share-wrap` | X-Wing shared secret | A DEK wrapped to one recipient |
-| `nmts/v3/share-name` | the file DEK | An item name re-sealed for a recipient |
+| `nmts/v3/share-name` | the file DEK | An item name re-sealed for a recipient (in a handover file, the name document that also binds its parts list and network, §5.6) |
 | `nmts/v3/share-content-hash` | the file DEK | A content hash re-sealed for a recipient |
+| `nmts/v3/handover-parts` | the file DEK | The list of stored pieces inside a handover file (§5.6, added 2026-09-23) |
+| `nmts/v3/link-wrap` | a public link's secret `S` | A file DEK wrapped for a public link (§5.8, added 2026-09-26) |
+| `nmts/v3/link-secret` | `dataKey` | A public link's secret `S`, kept for its uploader so the link can be shown again (§5.8, added 2026-09-26) |
 | `nmts/v3/device-label` | `dataKey` | A device's display name |
 | `nmts/v3/device-preview` | `dataKey` | A photo's small preview, made and kept on one device and never sent (added 2026-09-23) |
 | `nmts/v3/device-record` | `deviceWrapKey` | The "remember this device" record |
@@ -979,6 +1021,223 @@ bundle; the signature now carries it — §5.2a.)
    claims. A server that refuses to answer blocks the check — and the share then does not open,
    which is the safe direction.
 
+### 5.6 The handover file — `nmts-handover` version 1 (added 2026-09-23)
+
+A handover is a §5.3 share that travels in a file instead of a server row. The sender saves it and
+passes it on by any means; the recipient opens it with their own NMTS key and fetches the pieces
+straight from Walrus aggregators. The NMTS server is asked nothing on the recipient's side, and no
+share row is written on the sender's side.
+
+**Nothing is newly constructed.** The envelope is `wrap_dek_for` (§5.3) bit for bit, with the same
+`share-wrap` label and the same `payload_cmt` over `item`, `name` and `hash`. The digest is the §5.4
+re-seal. The name is the §5.4 re-seal of the §5.4 share document, extended by two keys (below).
+What the built-in share fetches from the server — the sender's identity, the list of stored pieces
+and the network — goes into the file. The one new object is that list, sealed under the file DEK
+with its own AAD (`nmts/v3/handover-parts`, §2.2). Like §2.5 this is a new name for a new object and
+not NCF-4: no existing key, envelope or address changes value.
+
+The file is one JSON object, UTF-8, at most 1 MiB (1,048,576 bytes). Every binary value is
+unpadded base64url in canonical form: the bits of the last character that carry no data are zero.
+
+```text
+{
+  "format":   "nmts-handover",
+  "version":  1,
+  "network":  "mainnet" | "testnet",
+  "item":     item id — a lowercase hyphenated UUID, exactly as bound into payload_cmt
+  "sender":   the sender's published identity, 4989 bytes (§5.1)
+  "envelope": the share envelope, 1240 bytes (§5.5) — its first 16 bytes are the sender's address
+  "name":     E(DEK, "nmts/v3/share-name", name document)             73 .. 65,536 bytes
+  "hash":     E(DEK, "nmts/v3/share-content-hash", SHA-256), 104 bytes
+  "parts":    E(DEK, "nmts/v3/handover-parts", parts document)        73 .. 655,360 bytes
+  "note":     ["<one English line>", "<one Korean line>"]             optional
+}
+
+name document  = {"f":"nmts-share-file/1","name":"<file name>","size":<real length>,
+                  "network":"mainnet"|"testnet","parts_sha256":"<SHA-256 of the parts bytes>"}
+parts document = {"f":"nmts-handover-parts/1",
+                  "parts":[{"i":0,"blob":"<blob id>"|null,"patch":"<quilt patch id>"|null,
+                            "len":<sealed length>,"exp":<end epoch>}, …]}
+```
+
+* **The binding.** `parts_sha256` is SHA-256 over the decoded bytes of `parts` (the sealed value,
+  not its text), unpadded base64url; `network` repeats the file's own. The name document is inside
+  `payload_cmt`, so both are bound to the envelope. Without them the parts list would be
+  authenticated only by the DEK — and every other recipient of the same file holds that DEK (the A6
+  reasoning of §5.3): such a holder could re-seal a list of their choosing, and anyone holding two
+  handovers of one file could swap their lists, and the recipient would see either under the real
+  sender's name. The writer therefore seals `parts` first, then the name document, then the envelope.
+* **The name document** is the §5.4 share document with `network` and `parts_sha256` added; a
+  built-in share's reader reads `name` and `size` and ignores keys it does not know, so the same
+  document is a valid share name. In a handover `size` is required, and the key set is exactly
+  these five.
+* **The parts document.** `i` runs 0, 1, … in order; each piece names exactly one of `blob` or
+  `patch` (a quilt patch is fetched by its patch id); ids are 1 to 256 characters of the base64url
+  alphabet; there are 1 to 4096 pieces; `len` is the sealed length the stream occupies (a positive
+  integer), from which the stream's own plaintext length follows exactly (§4.1). The key set of the
+  document and of each piece is closed.
+* **`exp`** is the piece's end epoch as the sender's drive recorded it when the file was made:
+  exclusive — the storage has ended once the current epoch reaches it — and 0 when the drive did
+  not know it. It is a hint, not a promise. The sender may extend the storage afterwards (the
+  pieces keep their ids) or destroy it, so a reader shows it as the value recorded at making time
+  and never refuses a download because of it. An integer from 0 to 2³²−1.
+* The real file length is `size` in the name document, as for any share; padding (if any) is taken
+  off with it.
+* **`note`** is for whoever opens the file in a text editor and is not read back. A reader accepts
+  it absent, or as an array of strings of any content. The two lines the reference writer puts
+  there are the `note` of `file_text` in the conformance fixture
+  `crypto/tests/vectors/ncf3-handover.json` (§7). The English one is
+  `An NMTS handover file. Sign in at nmts.me with the NMTS key it was made for, then open it from
+  Shared with me → Open handover file.`; the second says the same in Korean.
+* The default file name is `nmts-handover-<YYYY-MM-DD>.nmtshandover`, the date in UTC. It does not
+  carry the original file's name.
+
+**Reading one, in this order.** A reader refuses exactly what this list refuses, and the outcome
+it names:
+
+1. More than 1 MiB → *not a handover file*, before it is parsed.
+2. Not a JSON object → *not a handover file*. `format` other than `nmts-handover` → *not a handover
+   file*.
+3. `version`: an integer greater than 1 → *newer version*; any other value but 1 → *damaged*.
+4. `network` not `mainnet` or `testnet` → *damaged*; not the network the reader is on → *other
+   network*.
+5. A key other than the ten above → *damaged*. `note` present and not an array of strings →
+   *damaged*.
+6. `item` not already a lowercase hyphenated UUID → *damaged*. §5.3 lowercases the id before binding
+   it, so "ABC" and "abc" bind the same; a reader that accepted "ABC" would show text other than
+   what was bound.
+7. A binary field that is not canonical base64url, or not its exact length or within its bounds
+   (`sender` 4989, `envelope` 1240, `hash` 104, `name` and `parts` as above) → *damaged*.
+8. `sender` does not parse under §5.2a, or `verify_address(sender, envelope[0..16])` fails →
+   *damaged*.
+9. `unwrap_dek` with `payload_cmt` over `item`, `name`, `hash` fails → *not for this key* (made for
+   another key, or changed after it was made — deliberately indistinguishable, §5.5).
+10. `name` does not open, or is not the name document above, or its `network` is not the file's, or
+    its `parts_sha256` is not SHA-256 of `parts` → *damaged*.
+11. `parts` does not open, or is not the parts document above → *damaged*.
+
+A download then checks every fetched stream's position against its own header (§4.1) and the whole
+file against the sealed digest. Duplicate keys are not refused; a reader takes the last, as
+`JSON.parse` does — every value that matters is authenticated, so two spellings of one file can
+differ only in what nobody reads.
+
+**No signature.** As in §5.5, the recipient's certainty about the sender comes from the envelope
+opening at all, and a leaked handover file proves nothing to a third party.
+
+⚠ **Limits.**
+* Whoever holds the file sees the sender's public code in the clear (the envelope's first 16
+  bytes) and the item id (`item`), which is the file's id in the sender's drive.
+* The lengths are not padded: the length of `name` gives the length of the file name, and the
+  length of `parts` gives the number of pieces and whether they are quilt patches.
+* A handover cannot be taken back. The recipient can download the file until its storage ends or
+  its stored bytes are destroyed; removing the file from the sender's drive does neither, and a
+  piece in a quilt can only be destroyed together with the other files in that quilt.
+* When the sender names the recipient by public code, the server is asked for that code's identity
+  and so learns whom the account looked up, moments before the same account reads the file's
+  pieces. A §5.7 public code file avoids that lookup.
+* The chain shows which wallet paid for the storage. The aggregator the recipient fetches from sees
+  the recipient's network address, as for any download.
+
+### 5.7 The public code file — `nmts-public-code` version 1 (added 2026-09-23)
+
+A sender who has the recipient's public code file can make a handover without asking the server
+for the recipient's identity. The recipient saves it and gives it out like the public code.
+
+```text
+{"format":"nmts-public-code","version":1,
+ "code":"<public code, display form (§5.2)>",
+ "identity":"<the published identity, 4989 bytes, base64url>"}
+```
+
+The file is at most 8 KiB (8,192 bytes). A reader refuses it when it is larger;
+when it is not a JSON object or `format` is not `nmts-public-code`; when `version` is an integer
+greater than 1 (*newer version*) or any other value but 1; when it has a key other than these four;
+when `code` is empty or longer than 64 characters or does not parse as a public code; when
+`identity` is not canonical base64url of exactly 4989 bytes or does not parse under §5.2a; and when
+the address `identity` fingerprints to (§5.2) is not the address `code` spells. Nothing in this
+file is secret. The default file name is `nmts-public-code-<public code>.nmtscode`.
+
+⚠ **Limits.**
+* **The file proves only itself.** Whoever writes it chooses both `code` and `identity`, so a
+  reader that accepts it knows the two agree, not that they belong to the intended recipient. It
+  authenticates nothing unless the sender compares `code` with the code the recipient gave them
+  some other way. A sender who has both a code she was told and a file must use the code as the
+  check: the reference program refuses to make a handover when they differ.
+* **A file pins one identity.** `identity` carries its `key_epoch` (§5.1). Once public codes can be
+  replaced, a file made before the replacement keeps sealing to the old identity; the replacement
+  procedure, when it is specified, has to say whether a handover sealed to a replaced identity is
+  still opened or is refused.
+
+### 5.8 The public link (added 2026-09-26)
+
+A public link opens one file for whoever holds it, without an account and without an NMTS key.
+
+```text
+link    = https://nmts.me/l/<token>#<secret>
+token   = the link id: 16 bytes the server draws, unpadded base64url, 22 characters
+secret  = S: 32 bytes from the uploader's CSPRNG, one per link, unpadded base64url, 43 characters
+
+stored beside the token — all four made in the uploader's browser:
+  wrapped      = E(S,       "nmts/v3/link-wrap",          DEK)             104 bytes
+  name         = E(DEK,     "nmts/v3/share-name",         name document)   §5.4 — absent when the link hides the name
+  hash         = E(DEK,     "nmts/v3/share-content-hash", SHA-256)         104 bytes, §5.4
+  owner_secret = E(dataKey, "nmts/v3/link-secret",        S)               104 bytes — the uploader's copy
+```
+
+**Nothing else is newly constructed.** `E` is the §3 envelope. `name` and `hash` are the §5.4
+re-seals under the file DEK, and the name document is the §5.4 share document
+(`{"f":"nmts-share-file/1","name":…,"size":…}`). The two new objects are the DEK wrapped under
+`S` and `S` sealed under the uploader's `dataKey`, each with its own AAD (`nmts/v3/link-wrap`,
+`nmts/v3/link-secret`, §2.2). Like §2.5 and §5.6, these are new names for new objects and not
+NCF-4: no existing key, envelope or address changes value.
+
+* **`S` is used as the envelope key directly.** It is 32 bytes of CSPRNG output, which is what an
+  XChaCha20-Poly1305 key is. It is derived from nothing, so one link's secret says nothing about the
+  uploader's other keys or other links.
+* **The browser never sends the fragment.** The server, its logs and a `Referer` header see the token
+  and never `S`.
+* **The link carries no piece ids.** The server hands out the file's list of stored pieces only while
+  the token is alive, read from the file's current record at the time of the request, so an
+  extended storage period keeps the link working. A cut or expired token returns nothing. That is
+  what lets the uploader or the operator cut a link.
+* **The uploader can show the link again.** `owner_secret` goes back only to the account that made
+  the link, never to a link holder; the uploader opens it with `dataKey` and rebuilds the whole link
+  from the token and `S`. Its label keeps it from being opened as a wrapped DEK, which has the same
+  length under the same key.
+* ⛔ **A link opens one file.** The account key, `dataKey` and the key that opens the recovery list
+  never go into a link.
+
+**What the server can and cannot do.** It can withhold the file. It cannot substitute another one:
+`wrapped` opens only under this link's `S`, and pieces from another file fail the stream
+authentication under the DEK (§4) or the digest check.
+
+**Reading one, in this order.**
+
+1. Split the link at `#`. A fragment that is not canonical unpadded base64url of exactly 32 bytes →
+   *damaged link*.
+2. Ask the server for the token: unknown → *no such link*; cut or expired → *link cut*.
+3. `unwrap_dek_from_link(S, wrapped)` fails → *damaged link*. A wrong secret and a changed envelope
+   are deliberately indistinguishable (§3.2).
+4. If `name` is present, open it under the DEK with `nmts/v3/share-name` and read the share document
+   as §5.4 readers do.
+5. Fetch the pieces and open each stream under the DEK, checking its position against its own
+   header (§4.1).
+6. Open `hash` under the DEK with `nmts/v3/share-content-hash`, take padding off with the document's
+   `size`, and compare SHA-256 of the whole plaintext. A mismatch discards the download.
+
+A link password is not part of this version; when it comes it is a new object with its own label.
+
+⚠ **Limits.**
+* **The link is the key.** Anyone who receives the whole link opens the file, including an operator
+  who is sent it in a report. Cutting the link stops the server from serving the piece list. It does
+  not reach copies already downloaded or piece ids already learned, and a piece stays on the network
+  until its storage ends or is destroyed.
+* **A link that hides the name also hides the real length.** The length lives only in the name
+  document. For a file stored with size padding, a reader without that document cannot take the
+  padding off, and step 6 refuses the download.
+* The lengths are not padded: the length of `name` gives the length of the file name.
+* The fragment stays in the browser history of whoever opened the link.
+
 ---
 
 ## 6. File list
@@ -1255,6 +1514,35 @@ gains, all with fixed inputs and committed expected bytes:
    words, and a word in neither list. It was written by an independent implementation
    (`@scure/bip39`), not by the crate, and both the crate and the browser engine are held to it.
 
+10. **The handover file and the public code file** (§5.6, §5.7, 2026-09-23) — in their own
+   fixture, `crypto/tests/vectors/ncf3-handover.json`: three accounts from fixed codes, a handover
+   file from the first to the second with every nonce and the encapsulation randomness fixed — its
+   whole text, `note` included, and the name and parts documents under its seals — and twelve
+   refusals, each a complete file with the reader's network and the outcome §5.6 names: a parts list
+   from another handover of the same file, a parts list re-sealed by another holder of the file key,
+   a relabelled network, the other network, an upper-case item, a swapped sender, the wrong
+   recipient, a newer version, a version that is not a number, a non-canonical base64url value, an
+   unknown key, and not a handover at all. Beside them, the recipient's public code file and one
+   whose identity is another code's. The crate regenerates and opens it; the browser's reader and
+   the command-line tool's reader are both held to it.
+
+11. **EVM wallets** (§1.9, 2026-09-23) — in their own fixture, `crypto/tests/vectors/ncf3-evm.json`,
+   written by an independent implementation (`web/scripts/gen-evm-vectors.mjs`: `@noble/hashes` for
+   HKDF-Expand and Keccak-256, `@noble/curves`' `mapHashToField` for the reduction, and every address
+   checked a second time against viem). For the three `ncf3.json` accounts it pins wallets 0, 1 and
+   10 — seed, key and EIP-55 address — plus the reduction's edges (0 → 1, n − 1 → 1, n − 2 → n − 1,
+   2³⁸⁴ − 1) and private key 1's address, the generator's. The crate (`tests/vectors_evm.rs`) and the
+   browser engine are both held to it.
+
+12. **The public link** (§5.8, 2026-09-26) — in its own fixture, `crypto/tests/vectors/ncf3-links.json`:
+   a fixed link secret with its fragment spelling, a fixed DEK, and `wrapped`, `name` and `hash` at
+   fixed nonces, with the name document and the body the digest is taken over, and `owner_secret`
+   under a fixed `dataKey`. Six refusals, each a (secret, envelope) pair that must not open: another
+   link's secret, the right secret and DEK under the `dek-wrap` label, the same under the
+   `share-name` label, a flipped commitment byte, a flipped tag byte, and a truncated envelope. Two
+   more for `owner_secret`: another account's `dataKey`, and `S` under the right `dataKey` with the
+   `dek-wrap` label. The crate regenerates and opens it.
+
 Vectors are generated by the `vectors` cargo feature, which is the only thing in the crate that may
 supply a nonce; production constructors never accept one.
 
@@ -1424,7 +1712,14 @@ export** — were both closed on 2026-08-20.
   the length of the recovery manifest riding in a quilt is not padded while every file beside it
   is, and the §2.5 limit above was incomplete.
 
-⚠ What is still NOT re-attacked: nothing named here. The published recovery tool is reviewed on
-its own schedule, and had its own adversarial pass on 2026-08-20. ⛔ That is a statement about
-coverage, not about safety — a surface that has been attacked once has been attacked by the
-questions somebody thought to ask that day.
+* **The handover file and the public code file** (§5.6, §5.7) — reviewed once, on 2026-09-23,
+  before either was published. That review found that the parts list was bound to nothing but the
+  file key (fixed before publication: the name document now binds it and the network), that the
+  reader's refusals were stricter than this document said (now listed in §5.6 and §5.7 and nothing
+  else), and that the public code file proves only itself (now a stated limit). It has not been
+  attacked again since those changes.
+
+⚠ What is still NOT re-attacked: the handover and public code files as changed after their first
+review (above). The published recovery tool is reviewed on its own schedule, and had its own
+adversarial pass on 2026-08-20. ⛔ That is a statement about coverage, not about safety — a surface
+that has been attacked once has been attacked by the questions somebody thought to ask that day.

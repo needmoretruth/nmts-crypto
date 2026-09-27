@@ -15,7 +15,7 @@
 //! | Module | NCF-3 section | Responsibility |
 //! |--------|---------------|----------------|
 //! | [`codes`]    | §1, §7 | Account (160-bit) & voucher (128-bit) codes: Crockford Base32 + check symbol. |
-//! | [`kdf`]      | §1     | Account code → `master` (Argon2id) → every derived key (HKDF), including the wallet root. |
+//! | [`kdf`]      | §1     | Account code → `master` (Argon2id) → every derived key (HKDF), including the wallet root and the EVM wallets (§1.9). |
 //! | [`framing`]  | §4     | Chunk-framed stream encrypt/decrypt with anti-truncation/reorder + random access. |
 //! | [`wrap`]     | §3     | Envelope (DEK wrap, name/meta) and share tokens. |
 //! | [`share`]    | §5     | Share identity: hybrid post-quantum key agreement, the address, sender authentication. |

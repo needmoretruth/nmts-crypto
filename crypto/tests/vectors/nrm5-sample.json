@@ -1,0 +1,132 @@
+{
+  "_comment": [
+    "SHARED FIXTURE (NRM-5) — two independent implementations must agree on this document.",
+    "  Rust  : nmts/crypto/tests/manifest_forms.rs  (what the standalone recovery tool parses)",
+    "  Web   : nmts/web/test/recovery-map.test.ts   (what the browser writes)",
+    "Keys beginning with _ are documentation and are ignored by both parsers.",
+    "WHAT NRM-5 ADDS: a part stored on Filecoin (NMTS Heavy). Such a part says network 'filecoin',",
+    "its blob_id is the piece's PieceCIDv2 string (bafkzcib...), chain names the Filecoin network",
+    "('calibration' or 'mainnet'), and copies lists every storage company keeping a whole copy:",
+    "its registry number, the data set and piece numbers it proves the piece under (all three as",
+    "decimal strings, because the contract counts them as uint256), and the https address it",
+    "served the piece from, which ends in /piece/<blob_id>.",
+    "WHY THE VERSION MOVED: a reader written for NRM-4 would take the PieceCID to a Walrus",
+    "aggregator and be told 'not found' — the same answer as an expired blob. v5 makes it stop on",
+    "the document instead.",
+    "BOTH SIDES MUST REFUSE: a filecoin part, or chain or copies, in a document declaring v < 5;",
+    "chain or copies on a part that is not on filecoin; a filecoin part with no chain, a chain",
+    "other than the two, no copies, 0 or more than 12 copies, a blob_id that is not a PieceCIDv2,",
+    "a number that is not a canonical decimal uint256, a retrieval_url that is not",
+    "https://<host>.../piece/<blob_id>, and a filecoin part in an item placed in a quilt.",
+    "The three items: a Walrus file (unchanged by NRM-5), a one-part Heavy file kept at two",
+    "companies on Calibration, and a two-part Heavy file on mainnet. The hosts are .example",
+    "names and the pieces hold nothing — this exercises the format, not a network."
+  ],
+  "v": 5,
+  "seq": 15,
+  "prev_manifest_blob_id": "prevManifestBlob",
+  "generated_at": "2026-09-24T00:00:00Z",
+  "account_id": "abcdEFGH1234-_wx",
+  "items": [
+    {
+      "id": "88888888-8888-4888-8888-888888888888",
+      "name": "note.txt",
+      "path": "/docs",
+      "size": 12,
+      "dek": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      "kind": "file",
+      "parts": [
+        {
+          "part_index": 0,
+          "blob_id": "blobWalrus",
+          "plaintext_len": 12,
+          "network": "walrus"
+        }
+      ]
+    },
+    {
+      "id": "99999999-9999-4999-8999-999999999999",
+      "name": "scan.pdf",
+      "path": "/archive",
+      "size": 12345,
+      "dek": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+      "kind": "file",
+      "content_hash": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      "parts": [
+        {
+          "part_index": 0,
+          "blob_id": "bafkzcibd5adqy3m4o5lm6dnp2wzflzkkmcesjj2ad3r6l3llemvbei4fkusi5zy5",
+          "plaintext_len": 12345,
+          "network": "filecoin",
+          "chain": "calibration",
+          "copies": [
+            {
+              "provider_id": "7",
+              "data_set_id": "301",
+              "piece_id": "0",
+              "retrieval_url": "https://sp-a.example/piece/bafkzcibd5adqy3m4o5lm6dnp2wzflzkkmcesjj2ad3r6l3llemvbei4fkusi5zy5"
+            },
+            {
+              "provider_id": "11",
+              "data_set_id": "42",
+              "piece_id": "5",
+              "retrieval_url": "https://sp-b.example/pdp/piece/bafkzcibd5adqy3m4o5lm6dnp2wzflzkkmcesjj2ad3r6l3llemvbei4fkusi5zy5"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "name": "footage.mov",
+      "path": "/",
+      "size": 536871912,
+      "dek": "CwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCws",
+      "kind": "file",
+      "parts": [
+        {
+          "part_index": 0,
+          "blob_id": "bafkzcibcaamjinbdjpb32inisdkljq2coqwny3qak3agai6fe4ysv4zyyiyhgey",
+          "plaintext_len": 536870912,
+          "network": "filecoin",
+          "chain": "mainnet",
+          "copies": [
+            {
+              "provider_id": "1",
+              "data_set_id": "9001",
+              "piece_id": "12",
+              "retrieval_url": "https://pdp-one.example:8443/piece/bafkzcibcaamjinbdjpb32inisdkljq2coqwny3qak3agai6fe4ysv4zyyiyhgey"
+            },
+            {
+              "provider_id": "2",
+              "data_set_id": "9002",
+              "piece_id": "12",
+              "retrieval_url": "https://pdp-two.example/piece/bafkzcibcaamjinbdjpb32inisdkljq2coqwny3qak3agai6fe4ysv4zyyiyhgey"
+            }
+          ]
+        },
+        {
+          "part_index": 1,
+          "blob_id": "bafkzcibduapq3gujuqumqk76cjakcxjqlmjjurmukz45mojrwusmq2zc3txeqoz7",
+          "plaintext_len": 1000,
+          "network": "filecoin",
+          "chain": "mainnet",
+          "copies": [
+            {
+              "provider_id": "1",
+              "data_set_id": "9001",
+              "piece_id": "13",
+              "retrieval_url": "https://pdp-one.example:8443/piece/bafkzcibduapq3gujuqumqk76cjakcxjqlmjjurmukz45mojrwusmq2zc3txeqoz7"
+            },
+            {
+              "provider_id": "2",
+              "data_set_id": "9002",
+              "piece_id": "13",
+              "retrieval_url": "https://pdp-two.example/piece/bafkzcibduapq3gujuqumqk76cjakcxjqlmjjurmukz45mojrwusmq2zc3txeqoz7"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

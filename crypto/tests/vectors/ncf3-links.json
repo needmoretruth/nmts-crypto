@@ -1,0 +1,71 @@
+{
+  "body_utf8": "the contents behind a public link.",
+  "comment": "NCF-3 section 5.8 public link. The link is https://nmts.me/l/<token>#<link_secret_b64url>; the server stores wrapped, name (absent when the link hides the name), hash and owner_secret beside the token and never sees the secret.",
+  "content_sha256_hex": "a7a6c04923aa8fc017076d360e4ddacc220fc115ce26ae5e578f20c1f4e7eab4",
+  "data_key_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+  "dek_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+  "hash_hex": "505152535455565758595a5b5c5d5e5f6061626364656667a430ab7f6c28434ea0f5415ad1495a051de8c7fb1c0d4a1156708fe65e03addc1164cc023d5977f2fd2d2857472c5d3a5752c30196db9ab3ec64456789a38da577d3589f527ad795c8327e3d49f735c2",
+  "hash_nonce_hex": "505152535455565758595a5b5c5d5e5f6061626364656667",
+  "link_secret_b64url": "wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t8",
+  "link_secret_hex": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+  "name_document": "{\"f\":\"nmts-share-file/1\",\"name\":\"holiday.jpg\",\"size\":34}",
+  "name_hex": "303132333435363738393a3b3c3d3e3f404142434445464760fc300db58c481fcca9872c257c38a64da5160fb153df43938380fbb464ddcb9cdbf856850116d618eef1e9d1140fac5f49d49d1877d0cd79e58af6d908c2a0d718693401e2ceac5e81067186a9206b8908c412932ae28a052cd2d0408bf328ce46697b0d07b667",
+  "name_nonce_hex": "303132333435363738393a3b3c3d3e3f4041424344454647",
+  "owner_secret_hex": "707172737475767778797a7b7c7d7e7f80818283848586876911c31ab2c17378bc3b74ce5c512bd4f34fc14963d533443eb532f8f53ab594cedfd79dcc1fda491e8c659e5eca0b8dd37d353b54579a3b652e3dd5a5b147e114ed72ee085e7260f7019371edff88ae",
+  "owner_secret_nonce_hex": "707172737475767778797a7b7c7d7e7f8081828384858687",
+  "owner_secret_refusals": [
+    {
+      "data_key_hex": "909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+      "label": "other_data_key",
+      "owner_secret_hex": "707172737475767778797a7b7c7d7e7f80818283848586876911c31ab2c17378bc3b74ce5c512bd4f34fc14963d533443eb532f8f53ab594cedfd79dcc1fda491e8c659e5eca0b8dd37d353b54579a3b652e3dd5a5b147e114ed72ee085e7260f7019371edff88ae",
+      "why": "only the uploader's dataKey opens the sealed secret"
+    },
+    {
+      "data_key_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "label": "dek_wrap_label",
+      "owner_secret_hex": "707172737475767778797a7b7c7d7e7f808182838485868768c721c236ad3c4517bcfd4f9fe8c1984048aca7d7222c67e835809a1cee2865cedfd79dcc1fda491e8c659e5eca0b8dd37d353b54579a3b652e3dd5a5b147e1d423ed038aad2f4de403f7ba951ad6a0",
+      "why": "the right dataKey and the right secret under the DEK-wrap label: a wrapped DEK is never a link secret"
+    }
+  ],
+  "refusals": [
+    {
+      "label": "wrong_secret",
+      "link_secret_hex": "e0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "why": "the envelope names exactly one key (section 3.2); another link's secret does not open it",
+      "wrapped_hex": "101112131415161718191a1b1c1d1e1f2021222324252627c3197c3030519338c5c54f57a0ec0682d8dd4cbd0c0ebec606f484488bbaa4e4cc723011eaf7ad6f7a2484d03eaf0a1a3b29031a5eeaced0f0fb5432676a01abc83b2ec1b0dfa588ecd4a008aebf67fa"
+    },
+    {
+      "label": "dek_wrap_label",
+      "link_secret_hex": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+      "why": "the right secret and the right DEK under the account-wrap label: the role is bound",
+      "wrapped_hex": "101112131415161718191a1b1c1d1e1f2021222324252627d1dde9a1b2afd38b62a6adf67317759c8511b2f9b4a5e82b5738284631afe7c3cc723011eaf7ad6f7a2484d03eaf0a1a3b29031a5eeaced0f0fb5432676a01ab724b763c0f254322034fa6fae05e7cf4"
+    },
+    {
+      "label": "share_name_label",
+      "link_secret_hex": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+      "why": "the right secret and the right DEK under the share-name label: the role is bound",
+      "wrapped_hex": "101112131415161718191a1b1c1d1e1f20212223242526276535ae3087edd8a81ce238f75371058803a34a3102eed98d6af476df28119a0bcc723011eaf7ad6f7a2484d03eaf0a1a3b29031a5eeaced0f0fb5432676a01ab125ddbf5331031f7ca0c61e07ed2703f"
+    },
+    {
+      "label": "flipped_commitment",
+      "link_secret_hex": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+      "why": "one bit of the commitment changed; refused before decrypting",
+      "wrapped_hex": "101112131415161718191a1b1c1d1e1f2021222324252627c2197c3030519338c5c54f57a0ec0682d8dd4cbd0c0ebec606f484488bbaa4e4cc723011eaf7ad6f7a2484d03eaf0a1a3b29031a5eeaced0f0fb5432676a01abc83b2ec1b0dfa588ecd4a008aebf67fa"
+    },
+    {
+      "label": "flipped_ciphertext",
+      "link_secret_hex": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+      "why": "one bit of the tag changed",
+      "wrapped_hex": "101112131415161718191a1b1c1d1e1f2021222324252627c3197c3030519338c5c54f57a0ec0682d8dd4cbd0c0ebec606f484488bbaa4e4cc723011eaf7ad6f7a2484d03eaf0a1a3b29031a5eeaced0f0fb5432676a01abc83b2ec1b0dfa588ecd4a008aebf67fb"
+    },
+    {
+      "label": "truncated",
+      "link_secret_hex": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+      "why": "shorter than nonce + commitment + tag",
+      "wrapped_hex": "101112131415161718191a1b1c1d1e1f2021222324252627c3197c3030519338"
+    }
+  ],
+  "wrap_nonce_hex": "101112131415161718191a1b1c1d1e1f2021222324252627",
+  "wrapped_b64url": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnwxl8MDBRkzjFxU9XoOwGgtjdTL0MDr7GBvSESIu6pOTMcjAR6vetb3okhNA-rwoaOykDGl7qztDw-1QyZ2oBq8g7LsGw36WI7NSgCK6_Z_o",
+  "wrapped_hex": "101112131415161718191a1b1c1d1e1f2021222324252627c3197c3030519338c5c54f57a0ec0682d8dd4cbd0c0ebec606f484488bbaa4e4cc723011eaf7ad6f7a2484d03eaf0a1a3b29031a5eeaced0f0fb5432676a01abc83b2ec1b0dfa588ecd4a008aebf67fa"
+}

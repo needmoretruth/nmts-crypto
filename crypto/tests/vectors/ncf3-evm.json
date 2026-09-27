@@ -1,0 +1,127 @@
+{
+  "_comment": [
+    "NCF-3 §1.9 — EVM wallets (added 2026-09-23). Written by web/scripts/gen-evm-vectors.mjs with",
+    "@noble/hashes (HKDF-Expand, Keccak-256) and @noble/curves (mapHashToField, getPublicKey); every",
+    "address is checked a second time against viem's privateKeyToAddress. The Rust crate and the",
+    "browser engine are both held to this file and neither wrote it.",
+    "evmSeed(N) = HKDF-Expand(walletRoot, 'nmts/v3/evm-wallet/' || dec(N), 48)",
+    "evmKey(N)  = (OS2IP(evmSeed(N)) mod (n - 1)) + 1, n = the secp256k1 order",
+    "evmAddr(N) = keccak256(X || Y)[12..32], written EIP-55",
+    "wallet_root_hex comes from ncf3.json (kdf[].wallet_root_hex), so this file continues that chain."
+  ],
+  "version": "ncf3-evm-1",
+  "label_prefix": "nmts/v3/evm-wallet/",
+  "seed_len": 48,
+  "accounts": [
+    {
+      "label": "all_zero",
+      "code_bytes_hex": "0000000000000000000000000000000000000000",
+      "wallet_root_hex": "f77dc4e1c033d6bbf27684c1dabd9e6deefa553cd60b453cf33f96579109b599",
+      "wallets": [
+        {
+          "index": 0,
+          "label": "nmts/v3/evm-wallet/0",
+          "seed_hex": "2ec6a7a1251c96ecb16711d33f29db4f1795e1fbe70cc33f960b14cf6aba23db39edcfbf4441eb5c6752d93bf42347b0",
+          "key_hex": "5306e8104e37c9992065c47f44c9f32cb4ba9e1f1576a608baed7b2a165364f1",
+          "address": "0x5D5f50BD26f984c354c50eF47408F9243343e124"
+        },
+        {
+          "index": 1,
+          "label": "nmts/v3/evm-wallet/1",
+          "seed_hex": "abb35e9bc4e279de0ff17dedf1c9b58c243f8cade1503db5875ae77711fb89cf4ab9279f30a05a8db8bf3c35ca0401c6",
+          "key_hex": "fe70af151223a23ab0fefe617f1974887468ebfa8e0c83a4daf0c1b714f612c7",
+          "address": "0x35a222fB6709107291C82A3b8Ec47b3c97D296A8"
+        },
+        {
+          "index": 10,
+          "label": "nmts/v3/evm-wallet/10",
+          "seed_hex": "1ccd6586a4a2fe645918c6ccc06c2047b2346ee8c96c8f16ccbb717e9b0030c9df131cb4794d18fc1e2f1009f8a51c26",
+          "key_hex": "d6ce51bcc60eb79b0024748aebc392a70c3702358844dcc0dfc13621ea710367",
+          "address": "0x3632c5d6D0eD846565ce4c97D8187cc53BBb61f3"
+        }
+      ]
+    },
+    {
+      "label": "fixed_pattern",
+      "code_bytes_hex": "031425364758697a8b9cadbecfe0f10213243546",
+      "wallet_root_hex": "95d43f3820f2f1b25c9ae8d615af13e0ba2bc79be17e331c4fc6ee13f43f6c69",
+      "wallets": [
+        {
+          "index": 0,
+          "label": "nmts/v3/evm-wallet/0",
+          "seed_hex": "d8e9989d61751eb45d1ddfdcc6ccca148a632afe3b27046fa9520908053fad222b1c9d4fdfe15145e41444f9bd5617e7",
+          "key_hex": "9e087964b4be55fd220ea905628ab97c481c00797fbadf031240b26e5a663da8",
+          "address": "0x64CDfb9AC64Ed9b44a100506C6174193D6abf8E9"
+        },
+        {
+          "index": 1,
+          "label": "nmts/v3/evm-wallet/1",
+          "seed_hex": "492b1b8b37eb2b5f160e017792c46a09e66c19494b06c619fe4926c2b6f654711a5acbf42990f4e1e4a14c4ce526f9c8",
+          "key_hex": "436703ece11ca09b53d42df7877f5fb7814d096c33a49a8a87bb5d15d703ed49",
+          "address": "0x60609989309908938a0f2778601cB777C7aC4648"
+        },
+        {
+          "index": 10,
+          "label": "nmts/v3/evm-wallet/10",
+          "seed_hex": "cb0148f334f42163a4420fec586d58a7101e9b1e9c31838472cb4e470799ab570e8990eb5985e69087e1899cc2e54585",
+          "key_hex": "121793f8b37a63cc4f9bc8e11b793895ba98242323d8e2cab974e119b09c7386",
+          "address": "0xb184Fee6d5703cb3898F5D17779717Df65BA7985"
+        }
+      ]
+    },
+    {
+      "label": "extended_check_symbol_U",
+      "code_bytes_hex": "111111111111111111111111111111111111110d",
+      "wallet_root_hex": "f11a40d15eee29e33eab307565926bc2c88a14a7d1d4d751881ee64452aa1e24",
+      "wallets": [
+        {
+          "index": 0,
+          "label": "nmts/v3/evm-wallet/0",
+          "seed_hex": "32e959ff85cff34ca1eed119f6e2bd797739810ac3417fd4f04adedd735660dd6ed37eb4a361aff124bd23f43f025b87",
+          "key_hex": "b7ebe31c9220f3bb83fc4f1ce413054210b1a7bb094b564bd80aebd4acb14448",
+          "address": "0x9e1bBBc7B5a04388E985149eF3C755c71e1fF027"
+        },
+        {
+          "index": 1,
+          "label": "nmts/v3/evm-wallet/1",
+          "seed_hex": "4e0133f74e34b56874e8c901148acad245b926b665097f56e1c6c0de137f105bbbbaa7f04b182aacb650a1e4955af1f1",
+          "key_hex": "a8d966c2ad634b71692e6904dcd101c14ad30f530ab2c6bfd985fa7eccdceb72",
+          "address": "0x08FEED12A2861626d4a6518bFEdfdAC8f0d19CA6"
+        },
+        {
+          "index": 10,
+          "label": "nmts/v3/evm-wallet/10",
+          "seed_hex": "1965138dc0dc01be1e4200d07970dab5ea1735cd7157080097b4393d67784919be4d28e310db39d7a140914381a3cd44",
+          "key_hex": "0a5c9416eb956ce6ab9abd7222301c9af48f531cb5d189beb293af457b80e9c5",
+          "address": "0x1E866A3B1ba62fCE6b2e4ae48f50658fc50D3e13"
+        }
+      ]
+    }
+  ],
+  "reduction": [
+    {
+      "why": "zero is the floor: 0 maps to 1",
+      "seed_hex": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "key_hex": "0000000000000000000000000000000000000000000000000000000000000001"
+    },
+    {
+      "why": "n - 1 is the modulus itself, so it maps to 1",
+      "seed_hex": "00000000000000000000000000000000fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364140",
+      "key_hex": "0000000000000000000000000000000000000000000000000000000000000001"
+    },
+    {
+      "why": "n - 2 maps to n - 1, the largest key",
+      "seed_hex": "00000000000000000000000000000000fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd036413f",
+      "key_hex": "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364140"
+    },
+    {
+      "why": "all ones: 2^384 - 1",
+      "seed_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "key_hex": "4551231950b75fc4402da1732fc9bec14551231950b75fc4402da1732fc9bec0"
+    }
+  ],
+  "generator_key_one": {
+    "key_hex": "0000000000000000000000000000000000000000000000000000000000000001",
+    "address": "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf"
+  }
+}

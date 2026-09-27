@@ -2,8 +2,8 @@
 
 > **Status: LIVE AND STILL EVOLVING.** ⛔ The freeze this block used to announce — "the format
 > freezes at the first mainnet mirror write" — did not happen. NMTS moved to mainnet on 2026-08-02
-> and the format has moved twice since: NRM-3 (2026-08-17) and NRM-4 (2026-08-18), both recorded
-> in §6.
+> and the format has moved three times since: NRM-3 (2026-08-17), NRM-4 (2026-08-18) and NRM-5
+> (2026-09-24), all recorded in §6.
 > What actually governs a change is §6's own test, and it is stricter than a date: a field may be
 > added only with a journalled decision, and the version number moves only when **the absence of
 > the new form would change the meaning of something else**. A bump is a wall in front of every
@@ -15,10 +15,11 @@
 > MUST do with it. NRM-1 lists stay readable — see §6 for what changed, and for exactly what an NRM-1
 > list can and cannot promise a reader that an NRM-2 list can.
 >
-> ⚠ **The newest form is NRM-4 (2026-08-18): `padded_len`, a part sealed larger than the bytes it
-> holds.** ⛔ A document still claims the version its CONTENTS need — `minimum_version` — so an
-> ordinary list is still a v2 document and opens in every tool ever shipped. §2.2 is the field and
-> §6 is what changed.
+> ⚠ **The newest form is NRM-5 (2026-09-24): a part stored on Filecoin (NMTS Heavy)**, with
+> `chain` and `copies`. The one before it is NRM-4 (2026-08-18): `padded_len`, a part sealed larger
+> than the bytes it holds. ⛔ A document still claims the version its CONTENTS need —
+> `minimum_version` — so a list with no Filecoin part and no padding is still a v2 document and
+> opens in every tool ever shipped. §2.4 and §2.2 are the fields and §6 is what changed.
 >
 > ⚠ **The JSON schema in §2 was unchanged by NCF-3; the ENCRYPTION in §1 was not.** NCF-3 replaced NCF-1
 > and NCF-2 outright on 2026-07-29 and renamed this envelope's AAD, so §1 and the sealed-hash note in
@@ -101,6 +102,22 @@ exists for. A product that counted it as durability would be measuring the wrong
                                            //   the part was padded. absent = not padded. §2.2
           "sui_object_id": "0x…",          // OPTIONAL. on-chain blob object; never needed to READ
           "network": "walrus"              // OPTIONAL on the wire. absent = "walrus" (bullets below)
+        },
+        {                                  // ── a part on FILECOIN (NMTS Heavy), v5 — §2.4 ──
+          "part_index": 0,
+          "blob_id": "bafkzcib…",          // the piece's PieceCIDv2 string
+          "plaintext_len": 536870912,
+          "network": "filecoin",           // REQUIRED to be written out on a Filecoin part
+          "chain": "calibration",          // REQUIRED on a Filecoin part: "calibration" | "mainnet".
+                                           //   REFUSED on any other part
+          "copies": [                      // REQUIRED on a Filecoin part, 1..=12, in the order a
+            {                              //   reader tries them. REFUSED on any other part
+              "provider_id": "7",          //   decimal uint256: the company's registry number
+              "data_set_id": "301",        //   decimal uint256: the data set it proves the piece in
+              "piece_id": "0",             //   decimal uint256: the piece's number in that data set
+              "retrieval_url": "https://…/piece/bafkzcib…"  // where it served the piece. A HINT
+            }
+          ]
         }
       ],
       "quilt": {                           // present iff stored via a quilt cohort. ONE of two forms:
@@ -304,6 +321,58 @@ Reference implementations: `crypto/src/manifest.rs::check_padding` (the rules),
 `recovery/src/restore.rs::decrypt_part` (the reader), `web/src/lib/recovery/manifest-doc.ts` (the
 writer). The shared fixture is `crypto/tests/vectors/nrm4-sample.json`.
 
+### 2.4 Filecoin parts — `chain` and `copies` (v5)
+
+From 2026-09-24 a file may be stored on Filecoin instead of Walrus (the product tier "NMTS
+Heavy"). Each sealed part is one Filecoin **piece**, kept whole by storage companies — two, by
+default. The part's NCF-3 stream is exactly what it would have been on Walrus; only where it is
+kept changes, so every rule in §2.1 and §2.2 applies unchanged.
+
+**Why a Filecoin part needs more than a `blob_id`.** A Walrus blob id is an address: any public
+aggregator serves any blob. A piece's id — its PieceCIDv2 string, `bafkzcib…` — names the BYTES,
+not a place, and no public service serves every piece: a piece is served by the companies that
+keep it. So the part also says which chain (`chain`) and which companies (`copies`), with the
+three numbers under which each company proves on chain that it holds the piece.
+
+**A reader MUST:**
+
+1. try each copy's `retrieval_url` in the order written, with a plain `GET`, over **https only**;
+2. when every recorded address fails, look up each company's current address in the provider
+   registry on `chain` — `ServiceProviderRegistry.getProductCapabilities(provider_id, 0,
+   ["serviceURL"])` through a JSON-RPC `eth_call` — and try `{serviceURL}/piece/{blob_id}`;
+3. hand the bytes to the same NCF-3 checks as a Walrus part (§2.1 steps 3–5, §2.2).
+
+⛔ **A reader need not recompute the PieceCID.** The stream authenticates itself against the file
+key (AEAD, key commitment, sealed placement), so wrong bytes are refused whatever their id is.
+Recomputing a piece commitment would be a second check on the same bytes, and a hash tree over up
+to 512 MiB in every reader.
+
+⚠ **`retrieval_url` is a HINT, like `meta.storage.aggregators`**: a company can move. The registry
+on `chain` is where its current address is kept, which is why `provider_id` and `chain` are
+required and the URL alone is not enough.
+
+**A reader MUST REFUSE:**
+
+- `network: "filecoin"`, `chain`, or `copies` in a document declaring `v` below 5;
+- `chain` or `copies` on a part that is not on Filecoin;
+- a Filecoin part with no `chain`, or a `chain` other than `"calibration"` or `"mainnet"`;
+- a Filecoin part with no `copies`, or with fewer than 1 or more than 12;
+- a Filecoin part whose `blob_id` is not a PieceCIDv2 string (`bafkzcib` then lowercase base32);
+- a copy whose `provider_id`, `data_set_id` or `piece_id` is not a canonical decimal `uint256`
+  (digits only, no leading zero, at most 2²⁵⁶ − 1). They are strings because no JSON number type
+  holds a `uint256` exactly;
+- a copy whose `retrieval_url` is not `https://<host>…/piece/<blob_id>` with no query or fragment;
+- a Filecoin part in an item that has a `quilt` record. Quilts are Walrus's; a piece is stored on
+  its own.
+
+Every refusal is a contradiction or an alteration, never a guess: each field either locates the
+bytes or is quoted back to a contract, and a reader that picked a reading would be choosing where
+to fetch somebody's file from.
+
+Reference implementations: `crypto/src/manifest/filecoin.rs` (the rules),
+`recovery/src/filecoin.rs` (the reader's fetch and registry lookup). The shared fixture is
+`crypto/tests/vectors/nrm5-sample.json`.
+
 ### Who writes this JSON
 
 Two independent implementations produce/consume this document and they must not drift:
@@ -477,6 +546,33 @@ years later.
   `nmts/recovery/src/mapfile.rs` (reader, and the one place the refusal sentence is composed).
 
 ## 6. Version history
+
+### NRM-5 (2026-09-24) — Filecoin parts
+
+**What it adds.** A part may be on Filecoin: `network: "filecoin"`, `blob_id` = the piece's
+PieceCIDv2, and two part fields, `chain` and `copies` (§2.4). Walrus parts are unchanged. Nothing
+was removed or renamed.
+
+**Why the number had to move.** A reader written for NRM-4 knows one network that can be fetched.
+Following NRM-4 as written, a part is routed by its `network` word, and a reader that skipped the
+word — the "absent means walrus" rule makes that an easy mistake — would hand a PieceCID to a
+Walrus aggregator and be told "not found": the same answer as a blob that expired, which sends a
+person looking for a backup of a file that was never lost. The published `nmts-recovery` builds
+refuse an unknown network by name per file, which is correct but late — after the NMTS key has
+been typed. With the bump, every published build stops on the document instead, before a key is
+asked for, and says the list is newer than the program. The marker also makes `chain` and
+`copies` mean something: in a document older than v5 they are an alteration.
+
+**What still opens where.** A writer stamps `minimum_version`, so a list with no Filecoin part is
+still whatever it was before (v2, or v3 / v4 when it uses those forms). Only a list that holds a
+Heavy file is v5. ⛔ **As with NRM-4, the standalone tool has to be published before a writer
+emits v5**: people are holding builds that cannot read it.
+
+⚠ **The shared NRM-1 and NRM-2 fixtures changed their format probe** from `"filecoin"` to
+`"arweave"` on this date. `"filecoin"` was there as a registered name nothing had written, to stop
+either implementation passing with `"walrus"` hard-coded; from v5 it has fields a v1/v2 document
+cannot carry, so a v2 list naming it is refused. `"arweave"` is the registered name that is now
+in the position `"filecoin"` was in.
 
 ### 2026-08-19 — the self-description, and NO version moved
 

@@ -1,6 +1,6 @@
 [package]
 name = "nmts-crypto"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "NMTS end-to-end encryption engine — a pure, I/O-free implementation of the NCF-3 format (see docs/CRYPTO-FORMAT-NCF3.md)."
 authors = ["needmoretruth"]
@@ -70,6 +70,12 @@ thiserror = "2"
 # leaves out its Unicode normalization tables — they doubled the browser engine, and the only
 # normalization a Korean phrase needs is Hangul's own arithmetic (phrase.rs does it).
 bip39 = { version = "3.0.0", default-features = false, features = ["korean"] }
+# The EVM wallet that pays for NMTS Heavy on Filecoin (NCF-3 §1.9, added 2026-09-23): the
+# secp256k1 group order for the FIPS 186-5 A.2.1 reduction, the public key, and Keccak-256 for the
+# address. RustCrypto, the maintainers of the AEAD/HKDF/SHA-2 above; `arithmetic` only — no ECDSA,
+# no RNG: this crate derives the key and its address and never signs with it.
+k256 = { version = "0.14", default-features = false, features = ["arithmetic"] }
+sha3 = { version = "0.12", default-features = false }
 # Optional: WASM bindings surface (no bindings shipped yet; reserved for nmts/web).
 wasm-bindgen = { version = "0.2", optional = true }
 

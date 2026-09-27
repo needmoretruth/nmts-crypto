@@ -14,8 +14,9 @@
     "Covers: the chain fields, a multi-part file with no quilt, a quilted file, an item with no",
     "content hash (committed before hashes existed), a part with no Sui object id, a part that",
     "NAMES its storage network, and a part that omits it (= walrus, what pre-field maps look like).",
-    "The 'filecoin' value below is a FORMAT PROBE, not a claim that anything is stored there — a",
-    "non-default name is what stops either side passing this test with 'walrus' hardcoded."
+    "The 'arweave' value below is a FORMAT PROBE, not a claim that anything is stored there — a",
+    "non-default name is what stops either side passing this test with 'walrus' hardcoded. It",
+    "said 'filecoin' until NRM-5 (2026-09-24) gave that name a meaning a v1/v2 list cannot carry."
   ],
   "v": 1,
   "seq": 12,
@@ -55,7 +56,7 @@
         {
           "blob_id": "blobC",
           "plaintext_len": 12,
-          "network": "filecoin"
+          "network": "arweave"
         }
       ],
       "quilt": {

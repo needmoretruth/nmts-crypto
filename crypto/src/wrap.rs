@@ -44,8 +44,9 @@
 //! # AAD domain separation
 //! Each object type uses a distinct constant AAD so a ciphertext for one role can never be
 //! accepted as another. The full registry is NCF-3 §2.2; the ones defined here are
-//! `nmts/v3/dek-wrap`, `nmts/v3/name`, `nmts/v3/meta`, `nmts/v3/content-hash` and
-//! `nmts/v3/recovery-map` (the last used by [`crate::manifest`]).
+//! `nmts/v3/dek-wrap`, `nmts/v3/name`, `nmts/v3/meta`, `nmts/v3/content-hash`,
+//! `nmts/v3/recovery-map` (the last used by [`crate::manifest`]), `nmts/v3/handover-parts` (§5.6)
+//! and `nmts/v3/link-wrap` · `nmts/v3/link-secret` (§5.8).
 //!
 //! # Share token
 //! `base64url(0x01 || DEK)` — possession of the token IS possession of the key, by design;
@@ -98,6 +99,31 @@ pub const AAD_RECOVERY_MAP: &[u8] = b"nmts/v3/recovery-map";
 /// AAD for an encrypted whole-file plaintext content hash. Domain-separated from every other AAD
 /// so a hash envelope can never be opened as (or substituted for) a name/DEK/meta envelope.
 pub const AAD_CONTENT_HASH: &[u8] = b"nmts/v3/content-hash";
+/// AAD for the parts list inside a handover file (NCF-3 §5.6), sealed under the FILE DEK.
+///
+/// A handover file carries what a recipient needs to fetch a file straight from the storage
+/// network. The list of stored pieces is sealed so that whoever intercepts the file cannot even
+/// locate the ciphertext; its own separator keeps it from being opened as — or swapped for — the
+/// shared name or the shared digest, which are sealed under the same DEK.
+pub const AAD_HANDOVER_PARTS: &[u8] = b"nmts/v3/handover-parts";
+
+/// AAD for a file DEK wrapped under a public link's secret (NCF-3 §5.8), `E(S, "nmts/v3/link-wrap",
+/// DEK)`.
+///
+/// The server stores this envelope beside the link's token; the secret `S` travels only in the
+/// link's `#` fragment, which a browser never sends. Its own separator, because the key it is
+/// sealed under is handed to whoever holds the link: without one, an envelope from any other role
+/// sealed under a 32-byte value the link holder knows could be offered back as a wrapped DEK.
+pub const AAD_LINK_WRAP: &[u8] = b"nmts/v3/link-wrap";
+/// AAD for a public link's secret `S` sealed under the uploader's `dataKey` (NCF-3 §5.8),
+/// `E(dataKey, "nmts/v3/link-secret", S)`.
+///
+/// Stored beside the link so the uploader can show the whole link again later from any device; only
+/// the uploader's `dataKey` opens it. Its own separator, so this 32-byte secret can never be opened
+/// as — or handed back in place of — a wrapped DEK, which has the same length under the same key.
+pub const AAD_LINK_SECRET: &[u8] = b"nmts/v3/link-secret";
+/// Length of a public link's secret `S` (NCF-3 §5.8): 32 bytes from the OS CSPRNG, one per link.
+pub const LINK_SECRET_LEN: usize = 32;
 
 /// Length of a whole-file plaintext content hash (SHA-256).
 pub const CONTENT_HASH_LEN: usize = 32;
@@ -296,6 +322,58 @@ pub fn generate_dek() -> Zeroizing<[u8; DEK_LEN]> {
     let mut dek = Zeroizing::new([0u8; DEK_LEN]);
     OsRng.fill_bytes(&mut *dek);
     dek
+}
+
+/// Draws a fresh public-link secret `S` (NCF-3 §5.8). One per link: two links to one file share
+/// nothing but the DEK they both open, so cutting one leaves the other's envelope useless to anyone
+/// holding only the first link.
+pub fn generate_link_secret() -> Zeroizing<[u8; LINK_SECRET_LEN]> {
+    let mut secret = Zeroizing::new([0u8; LINK_SECRET_LEN]);
+    OsRng.fill_bytes(&mut *secret);
+    secret
+}
+
+/// Wraps a file DEK for a public link: `E(S, "nmts/v3/link-wrap", DEK)` (NCF-3 §5.8), 104 bytes.
+///
+/// `S` is used as the envelope key directly — it is 32 bytes of CSPRNG output, which is exactly what
+/// an XChaCha20-Poly1305 key must be, so an HKDF step would add a name and no strength.
+pub fn wrap_dek_for_link(link_secret: &[u8; LINK_SECRET_LEN], dek: &[u8; DEK_LEN]) -> Vec<u8> {
+    seal(link_secret, AAD_LINK_WRAP, dek)
+}
+
+/// Unwraps the DEK a public link's envelope carries. A wrong secret, a tampered envelope and an
+/// envelope sealed for any other role all fail with [`WrapError::Auth`] alike (§3.2).
+pub fn unwrap_dek_from_link(
+    link_secret: &[u8; LINK_SECRET_LEN],
+    wrapped: &[u8],
+) -> Result<Zeroizing<[u8; DEK_LEN]>, WrapError> {
+    let pt = Zeroizing::new(open(link_secret, AAD_LINK_WRAP, wrapped)?);
+    if pt.len() != DEK_LEN {
+        return Err(WrapError::BadDekLength);
+    }
+    let mut dek = Zeroizing::new([0u8; DEK_LEN]);
+    dek.copy_from_slice(&pt);
+    Ok(dek)
+}
+
+/// Seals a link's secret for its uploader: `E(dataKey, "nmts/v3/link-secret", S)` (NCF-3 §5.8),
+/// 104 bytes. This is what lets the uploader copy the same link again later.
+pub fn seal_link_secret(data_key: &[u8; 32], link_secret: &[u8; LINK_SECRET_LEN]) -> Vec<u8> {
+    seal(data_key, AAD_LINK_SECRET, link_secret)
+}
+
+/// Opens a link's secret sealed by [`seal_link_secret`].
+pub fn open_link_secret(
+    data_key: &[u8; 32],
+    sealed: &[u8],
+) -> Result<Zeroizing<[u8; LINK_SECRET_LEN]>, WrapError> {
+    let pt = Zeroizing::new(open(data_key, AAD_LINK_SECRET, sealed)?);
+    if pt.len() != LINK_SECRET_LEN {
+        return Err(WrapError::BadDekLength);
+    }
+    let mut secret = Zeroizing::new([0u8; LINK_SECRET_LEN]);
+    secret.copy_from_slice(&pt);
+    Ok(secret)
 }
 
 /// Encodes a share token for a file DEK: `base64url(0x01 || DEK)` (§5).

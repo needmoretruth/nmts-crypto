@@ -54,14 +54,16 @@ use nmts_crypto::{b64, kdf, manifest, share, wrap};
 use sha2::{Digest, Sha256};
 use wasm_bindgen::{prelude::*, JsError};
 
-// ⛔ TWO SIBLING FILES BECAUSE THIS ONE HAS A CEILING (2026-09-20 · `check:size`), not because the
-//    surface is split: `convert` holds the JS-boundary helpers every export below calls, and
-//    `openers` holds the four NCF-3 §1.7 exports and `codes` the account-code and phrase ones.
-//    `#[wasm_bindgen]` exports by symbol, so a function's module changes neither its JavaScript
-//    name nor its shape.
+// ⛔ SIBLING FILES BECAUSE THIS ONE HAS A CEILING (2026-09-20 · `check:size`), not because the
+//    surface is split: `convert` holds the JS-boundary helpers every export below calls; `openers`
+//    the NCF-3 §1.7 exports, `codes` the account-code and phrase ones, `wallets` the Sui and EVM
+//    wallet keys (§1.4 · §1.9) and `links` the public link (§5.8). `#[wasm_bindgen]` exports by
+//    symbol, so a function's module changes neither its JavaScript name nor its shape.
 pub mod codes;
 mod convert;
+pub mod links;
 pub mod openers;
+pub mod wallets;
 
 use convert::{fixed, js_int_u32, js_int_u64, parse_header, u64_to_js};
 
@@ -133,19 +135,6 @@ pub fn device_wrap_key(passphrase: &[u8], salt: &[u8]) -> Result<Vec<u8>, JsErro
     let key =
         kdf::derive_device_wrap_key(passphrase, salt).map_err(|e| JsError::new(&e.to_string()))?;
     Ok(key.to_vec())
-}
-
-/// Derives the Ed25519 seed for wallet number `index` from the 32-byte `wallet_root`.
-///
-/// EVERY wallet comes from here, including wallet 0. NCF-2 gave the first wallet its own
-/// derivation off the account PRK because it already existed on chain and could not move; NCF-3
-/// deletes that exception, so there is one rule and no index this function refuses.
-#[wasm_bindgen]
-pub fn wallet_seed_for(wallet_root: &[u8], index: f64) -> Result<Vec<u8>, JsError> {
-    let root: [u8; 32] = fixed(wallet_root, "wallet_root")?;
-    let n = js_int_u64(index, "index")?;
-    let n = u32::try_from(n).map_err(|_| JsError::new("wallet index must fit in 32 bits"))?;
-    Ok(kdf::wallet_seed_from_root(&root, n)[..].to_vec())
 }
 
 /// The ACCOUNT CODE of AI account number `index` (1-based) from the 32-byte `ai_account_root`
